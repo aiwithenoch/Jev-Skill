@@ -1,0 +1,3 @@
+interface:
+  display_name: "Jev Skill"
+  short_description: "Build typed Jev and local-model decision harnesses"
