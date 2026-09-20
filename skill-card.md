@@ -3,8 +3,9 @@
 ## What It Does
 
 This skill builds typed Jev decision workflows and evaluates them over
-reviewed golden sets. It supports TypeSafe Jev plus local Ollama and
-OpenAI-compatible runtimes such as vLLM, LM Studio, and llama.cpp server.
+reviewed golden sets. It supports TypeSafe Jev, the community OpenJev native
+server, local Ollama, and OpenAI-compatible runtimes such as vLLM, LM Studio,
+and llama.cpp server.
 The included harness validates Noul, Choice, and Score answers; can aggregate
 independent samples; can run a typed verifier; and marks uncertain cases for
 review instead of silently forcing a decision.

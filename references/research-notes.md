@@ -32,6 +32,8 @@ guidance. The live pages remain authoritative.
 - Official Python SDK: <https://github.com/typesafe-ai/typesafe-sdk-python>
 - Official JavaScript SDK: <https://github.com/typesafe-ai/typesafe-sdk-js>
 - Official System One adapter: <https://github.com/typesafe-ai/system-one-adapter-python>
+- Community OpenJev local scorer: <https://github.com/daseinlabs/open-jev>
+- Jev-class model comparison and JevBench protocol: <https://benchmarkheaven.com/jev-models>
 - vLLM structured outputs: <https://docs.vllm.ai/en/latest/features/structured_outputs/>
 - Ollama structured outputs: <https://github.com/ollama/ollama/blob/main/docs/capabilities/structured-outputs.mdx>
 - LM Studio structured output: <https://beta.lmstudio.ai/docs/developer/openai-compat/structured-output>
@@ -193,6 +195,22 @@ and llama.cpp expose OpenAI-compatible structured-output routes; Ollama
 exposes a native `format` JSON-schema field. The provider adapters are small
 so a local runtime can be swapped without changing question definitions or
 evaluation records.
+
+### Open Jev-compatible runtimes
+
+The community `daseinlabs/open-jev` project is a useful local interoperability
+target: it implements a `/v1/systemone` route over a one-pass option scorer and
+also exposes a lower-level `/score` route. Its documented implementation uses
+MLX and a local Gemma checkpoint on Apple Silicon. The Jev Skill harness calls
+the typed route directly through `--provider openjev`, preserving the same
+question files and report schema used for hosted Jev and other local runtimes.
+
+This is compatibility, not weight parity. Benchmark Heaven's JevBench page
+lists several independent Jev-class rebuilds, including OpenJev, SemIf, and
+open-alternative-jev, while identifying TypeSafe's Jev as closed. Treat each
+rebuild as a separate model with its own calibration, license, model-card, and
+distribution checks. Do not copy upstream source or redistribute checkpoints
+without confirming the upstream repository and model licenses.
 
 Structured decoding is a syntax guarantee, not a semantic truth guarantee.
 The strongest practical stack implemented here is:

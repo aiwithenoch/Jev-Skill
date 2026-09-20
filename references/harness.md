@@ -1,8 +1,8 @@
 # Jev evaluation harness
 
 `scripts/jev_harness.py` is a small, dependency-free runner for Jev golden
-sets. It validates typed question definitions, calls TypeSafe or a local
-Ollama/OpenAI-compatible endpoint concurrently, and reports accuracy,
+sets. It validates typed question definitions, calls TypeSafe, OpenJev, or a
+local Ollama/OpenAI-compatible endpoint concurrently, and reports accuracy,
 calibration, reliability, latency, and token usage. It does not print state or
 API keys.
 
@@ -94,6 +94,29 @@ python3 scripts/jev_harness.py \
   --samples 5 --temperature 0.4 --verify \
   --questions questions.json --cases cases.jsonl
 ```
+
+Run against the community OpenJev server. OpenJev exposes the native typed
+route, so the harness sends the same `state`, `model`, and `questions` payload
+without a generated JSON wrapper:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider openjev \
+  --base-url http://127.0.0.1:8000 \
+  --model jev-local \
+  --concurrency 1 \
+  --questions questions.json --cases cases.jsonl \
+  --output openjev-report.json
+```
+
+The current OpenJev implementation is a local MLX/Apple-Silicon scorer with a
+TypeSafe-compatible `/v1/systemone` surface. It is not TypeSafe's hosted Jev
+weights. Its scorer is deterministic, so non-zero temperature and per-sample
+seed flags do not create independent model samples; use repeated calls only
+when measuring endpoint stability.
+The upstream zero-shot scorer also documents its probabilities as approximate,
+so calibrate thresholds on your own labeled cases rather than treating a high
+local probability as proof.
 
 For llama.cpp's direct JSON-schema request shape, add
 `--structured-protocol llama.cpp`. Local API keys are optional; if a server

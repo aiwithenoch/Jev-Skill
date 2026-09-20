@@ -173,6 +173,26 @@ test-time consensus, an optional verifier, abstention-to-review, and measured
 calibration. Keep a Jev benchmark as the reference path and compare local
 models against it on the same cases.
 
+OpenJev has a native TypeSafe-compatible server for local one-pass option
+scoring on Apple Silicon/MLX. Use the first-class `openjev` provider when its
+server is running:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider openjev \
+  --base-url http://127.0.0.1:8000 \
+  --model jev-local \
+  --concurrency 1 \
+  --questions questions.json --cases cases.jsonl \
+  --output openjev-report.json
+```
+
+This integration calls OpenJev's native `POST /v1/systemone` route rather than
+wrapping it in a chat prompt. OpenJev is an independent community project;
+its local scorer and model behavior must be benchmarked separately from
+TypeSafe's hosted Jev. Keep the upstream repository's licensing and model
+distribution terms in view before redistributing its code or weights.
+
 Ollama uses its native structured-output endpoint:
 
 ```bash

@@ -141,6 +141,30 @@ class OllamaHandler(BaseHTTPRequestHandler):
         return
 
 
+class OpenJevHandler(BaseHTTPRequestHandler):
+    path_seen = None
+    body_seen = None
+
+    def do_POST(self):  # noqa: N802 - stdlib handler API
+        self.__class__.path_seen = self.path
+        length = int(self.headers.get("Content-Length", "0"))
+        self.__class__.body_seen = json.loads(self.rfile.read(length))
+        response = {
+            "model": "gemma-3-4b-it",
+            "answers": candidate_answers(False),
+            "usage": {"input_tokens": 21, "output_tokens": 6},
+        }
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, *_args):
+        return
+
+
 class HarnessTests(unittest.TestCase):
     def test_strict_json_and_aggregation(self):
         with self.assertRaises(ValueError):
@@ -219,6 +243,32 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(validated["usage"], {"input_tokens": 7, "output_tokens": 8})
         self.assertEqual(warnings, [])
         self.assertEqual(validation_warnings, [])
+
+    def test_openjev_native_typed_endpoint_and_usage(self):
+        OpenJevHandler.path_seen = None
+        OpenJevHandler.body_seen = None
+        server = ThreadingHTTPServer(("127.0.0.1", 0), OpenJevHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            record = harness.run_case(
+                copy.deepcopy(CASE),
+                QUESTIONS,
+                options(
+                    f"http://127.0.0.1:{server.server_port}",
+                    provider="openjev",
+                    verify=False,
+                    samples=1,
+                ),
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertTrue(record["ok"], record)
+        self.assertEqual(record["model"], "gemma-3-4b-it")
+        self.assertEqual(record["usage"], {"input_tokens": 21, "output_tokens": 6})
+        self.assertEqual(OpenJevHandler.path_seen, "/v1/systemone")
+        self.assertEqual(set(OpenJevHandler.body_seen), {"state", "model", "questions"})
+        self.assertNotIn("messages", OpenJevHandler.body_seen)
 
 
 if __name__ == "__main__":

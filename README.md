@@ -48,6 +48,8 @@ schemas, thresholds, arithmetic, policy, side effects, and escalation. The
 included harness lets the same Noul/Choice/Score question set run against:
 
 - TypeSafe Jev (`POST /v1/systemone`)
+- OpenJev's local TypeSafe-compatible server (`POST /v1/systemone`) backed by
+  one-pass option scoring on Apple Silicon/MLX
 - Ollama native structured outputs (`POST /api/chat`)
 - OpenAI-compatible local servers such as vLLM, LM Studio, and llama.cpp
 
@@ -102,6 +104,39 @@ python3 scripts/jev_harness.py \
   --questions questions.json \
   --cases cases.jsonl
 ```
+
+Run against the community [OpenJev](https://github.com/daseinlabs/open-jev)
+server after its Apple-Silicon setup and `make serve`:
+
+```bash
+git clone https://github.com/daseinlabs/open-jev.git
+cd open-jev
+make setup
+make serve
+```
+
+Then, from the Jev Skill repository, run:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider openjev \
+  --base-url http://127.0.0.1:8000 \
+  --model jev-local \
+  --questions questions.json \
+  --cases cases.jsonl \
+  --concurrency 1 \
+  --output openjev-report.json
+```
+
+OpenJev is a community implementation, not TypeSafe's proprietary Jev
+weights. Its native endpoint returns the same typed response surface, so this
+repo can measure its accuracy, calibration, latency, and review rate beside
+the hosted model without changing the question set. OpenJev's MLX scorer is
+deterministic; repeated samples are useful for transport stability, not
+sampling diversity.
+OpenJev's default zero-shot log-probability scores are not automatically
+calibrated; use a labeled golden set and the harness calibration metrics before
+using thresholds in production.
 
 Use `--structured-protocol llama.cpp` for llama.cpp's direct schema request
 shape. Structured output is strict by default; `--allow-json-repair` is an
@@ -179,9 +214,9 @@ golden sets kept out of version control.
 
 ### Does Jev Skill require the Jev API?
 
-No. It can run against Ollama, vLLM, LM Studio, or llama.cpp server. The Jev
-API gives you Jev's model; local providers give you the same typed contract
-and reliability harness using the model you run.
+No. It can run against OpenJev, Ollama, vLLM, LM Studio, or llama.cpp server.
+The Jev API gives you Jev's model; local providers give you the same typed
+contract and reliability harness using the model you run.
 
 ### Does it make a local model as intelligent as Jev?
 
