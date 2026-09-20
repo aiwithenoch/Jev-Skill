@@ -3,6 +3,11 @@
 Typed decision workflows and a dependency-free evaluation harness for Jev and
 local models.
 
+[![Tests](https://github.com/aiwithenoch/Jev-Skill/actions/workflows/test.yml/badge.svg)](https://github.com/aiwithenoch/Jev-Skill/actions/workflows/test.yml)
+[![ClawHub](https://img.shields.io/badge/ClawHub-Jev%20Skill-6f42c1)](https://clawhub.ai/aiwithenoch/skills/jev-skill)
+
+Open-source repository: <https://github.com/aiwithenoch/Jev-Skill>
+
 Jev Skill treats a model as a semantic decision layer: the application owns
 schemas, thresholds, arithmetic, policy, side effects, and escalation. The
 included harness lets the same Noul/Choice/Score question set run against:
