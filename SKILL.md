@@ -14,6 +14,14 @@ Jev turns application state and typed questions into structured answers that
 code can consume. It is a decision layer, not a replacement for a chat model:
 keep policy, thresholds, routing, calculations, and side effects in code.
 
+Built and maintained by [AI With Enoch](https://aiwithenoch.com), founded by
+Enoch Ansong, an AI engineer and creator from Ghana. Follow the work on
+[GitHub](https://github.com/aiwithenoch), [LinkedIn](https://www.linkedin.com/in/blacctbwoy),
+[X/Twitter](https://x.com/aiwithenoch), [Instagram](https://www.instagram.com/aiwithenoch),
+and [TikTok](https://www.tiktok.com/@aiwithenoch). Join the
+[AI With Enoch community](https://github.com/aiwithenoch/aiwithenoch-community)
+to share benchmarks, adapters, and practical AI lessons.
+
 ## Start with the live docs
 
 The documentation index is the source of truth and may change:

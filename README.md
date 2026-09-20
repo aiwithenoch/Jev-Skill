@@ -1,12 +1,47 @@
-# Jev Skill
+# Jev Skill — Open-Source Typed AI Decision Harness
 
-Typed decision workflows and a dependency-free evaluation harness for Jev and
-local models.
+Jev Skill is an open-source typed AI decision harness for Jev, TypeSafe, and
+local LLMs. It turns unstructured model guesses into validated Noul, Choice,
+and Score decisions with consensus, verification, calibration, abstention,
+and CI gates.
 
 [![Tests](https://github.com/aiwithenoch/Jev-Skill/actions/workflows/test.yml/badge.svg)](https://github.com/aiwithenoch/Jev-Skill/actions/workflows/test.yml)
 [![ClawHub](https://img.shields.io/badge/ClawHub-Jev%20Skill-6f42c1)](https://clawhub.ai/aiwithenoch/skills/jev-skill)
 
 Open-source repository: <https://github.com/aiwithenoch/Jev-Skill>
+
+Built for developers shipping reliable AI agents, LLM routing, RAG systems,
+structured extraction, model evaluation, and production automation.
+
+## Built by AI With Enoch
+
+Jev Skill is created and maintained by Enoch Ansong, an AI engineer and
+creator from Ghana, founder of Riverside AI and AI With Enoch. The project is
+part of a wider mission to build practical, accessible AI systems and help
+more people across Africa create with AI.
+
+- Website: <https://aiwithenoch.com>
+- GitHub: <https://github.com/aiwithenoch>
+- LinkedIn: <https://www.linkedin.com/in/blacctbwoy>
+- X/Twitter: <https://x.com/aiwithenoch>
+- Instagram: <https://www.instagram.com/aiwithenoch>
+- TikTok: <https://www.tiktok.com/@aiwithenoch>
+
+## Join the community
+
+Share benchmarks, adapters, golden cases, failure examples, and production
+lessons through the [AI With Enoch community](https://github.com/aiwithenoch/aiwithenoch-community).
+Community preview work also lives in
+[ai-with-enoch-community](https://github.com/aiwithenoch/ai-with-enoch-community).
+Issues and pull requests are welcome here—especially improvements that make
+local AI more reliable and understandable.
+
+## Why this exists
+
+Most model integrations ask for prose and then hope the answer is correct.
+That makes routing, grading, extraction, and automation fragile. Jev Skill
+defines the decision explicitly, validates the shape of every response, tests
+the model on reviewed cases, and escalates uncertainty instead of hiding it.
 
 Jev Skill treats a model as a semantic decision layer: the application owns
 schemas, thresholds, arithmetic, policy, side effects, and escalation. The
@@ -139,6 +174,38 @@ python3 /Users/admin/.codex/skills/.system/skill-creator/scripts/quick_validate.
 The tests use local fake HTTP servers and never require a TypeSafe key or a
 running model. Live model benchmarks should be run separately with sensitive
 golden sets kept out of version control.
+
+## FAQ
+
+### Does Jev Skill require the Jev API?
+
+No. It can run against Ollama, vLLM, LM Studio, or llama.cpp server. The Jev
+API gives you Jev's model; local providers give you the same typed contract
+and reliability harness using the model you run.
+
+### Does it make a local model as intelligent as Jev?
+
+No. It cannot change model weights. It makes local-model decisions more
+structured, testable, measurable, and safer to deploy.
+
+### Can Codex or Claude Code use it?
+
+Yes. They can create question sets, generate golden cases, run the harness,
+review reports, and help fix failures. The harness itself calls model
+endpoints and does not depend on an interactive coding agent.
+
+### What does “Noul / Choice / Score” mean?
+
+Noul answers a yes/no question with a probability. Choice selects one named
+category. Score returns a bounded, ordered level with a probability
+distribution. Your application still owns the final policy and side effects.
+
+## Roadmap
+
+- More provider adapters and reproducible local benchmark packs.
+- Calibration fitting and threshold selection for domain-specific costs.
+- Shared adversarial and metamorphic case libraries.
+- First-class integrations for AI coding agents and CI platforms.
 
 ## Research and design notes
 
