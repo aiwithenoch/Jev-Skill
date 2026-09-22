@@ -13,6 +13,12 @@ Open-source repository: <https://github.com/aiwithenoch/Jev-Skill>
 Built for developers shipping reliable AI agents, LLM routing, RAG systems,
 structured extraction, model evaluation, and production automation.
 
+For LangChain agents, Jev can sit in the control plane: route a run to a
+cheaper or stronger model, classify a proposed tool call before execution, and
+keep the final permission decision in code. See
+[references/langchain.md](references/langchain.md) and the optional
+[example](examples/langchain_jev.py).
+
 ## Built by AI With Enoch
 
 Jev Skill is created and maintained by Enoch Ansong, an AI engineer and
@@ -207,6 +213,30 @@ LocalJev is wire-compatible but its probabilities are generated and
 self-reported by the upstream model; they are not equivalent to reading
 OpenJev logits. Treat its calibration as a separate benchmark result.
 
+## LangChain agent harness
+
+The official `langchain-typesafe` integration exposes Jev as a LangChain
+Runnable. Install it only in applications that need the optional integration:
+
+```bash
+python -m pip install "langchain-typesafe[experimental]"
+```
+
+Use `TypeSafeClassifier` for typed decisions. Its experimental middleware adds
+two useful control points: `ModelRouterMiddleware` chooses a model once before
+an agent run, and `AutoModeMiddleware` can block configured risky tools before
+their handlers execute. These are learned signals, not authorization: keep
+allowlists, user approval, path restrictions, spend caps, and side-effect
+policy in deterministic application code. The middleware is fail-closed on
+classifier errors in the current package, but tool safety still belongs to
+the runtime.
+
+The LangChain package calls hosted TypeSafe Jev. It does not automatically
+switch to this repository's local `openjev`, `openjev-hf`, or `localjev`
+providers; use the harness CLI to benchmark those providers separately. Read
+[the LangChain guide](references/langchain.md) for routing, pre-tool gating,
+local-provider boundaries, and agent-level evaluation.
+
 Use `--structured-protocol llama.cpp` for llama.cpp's direct schema request
 shape. Structured output is strict by default; `--allow-json-repair` is an
 explicit diagnostic escape hatch and should remain off in CI.
@@ -296,8 +326,9 @@ structured, testable, measurable, and safer to deploy.
 ### Can Codex or Claude Code use it?
 
 Yes. They can create question sets, generate golden cases, run the harness,
-review reports, and help fix failures. The harness itself calls model
-endpoints and does not depend on an interactive coding agent.
+review reports, and help fix failures. LangChain applications can also use
+the optional `langchain-typesafe` Runnable and middleware; the harness itself
+does not depend on an interactive coding agent.
 
 ### What does “Noul / Choice / Score” mean?
 

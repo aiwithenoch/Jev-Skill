@@ -34,7 +34,9 @@ The documentation index is the source of truth and may change:
 
 Read the targeted primitive, pattern, SDK, or cookbook page before writing a
 version-sensitive integration. Use [research-notes.md](references/research-notes.md)
-for the current design map and links to the most relevant pages.
+for the current design map and links to the most relevant pages. When building
+LangChain agents, read [langchain.md](references/langchain.md) for the
+optional classifier and middleware integration.
 
 ## Core workflow
 
@@ -139,6 +141,22 @@ yes probability is the signal.
 - Composite scoring: keep atomic Scores and combine them with weights in code.
 - Verification: check a claim or extracted field against evidence and escalate
   uncertain cases.
+
+## LangChain agent control plane
+
+For LangChain applications, use the official `langchain-typesafe` package as
+an optional hosted TypeSafe integration. `TypeSafeClassifier` is a Runnable
+for Noul, Choice, and Score decisions. Its experimental middleware provides
+two control points: `ModelRouterMiddleware` selects a model once before the
+agent run, while `AutoModeMiddleware` classifies configured tool calls before
+their handlers execute.
+
+Treat both as advisory learned signals. The runtime must still enforce tool
+allowlists, authorization, path and spend limits, user approvals, and
+irreversible-action policy. The current auto-mode middleware blocks rather than
+requesting approval, and unlisted tools bypass it. Read
+[references/langchain.md](references/langchain.md) for installation, examples,
+security boundaries, and evaluation guidance.
 
 ## Evaluation and operational guardrails
 

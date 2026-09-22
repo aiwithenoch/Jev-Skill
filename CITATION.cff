@@ -20,6 +20,9 @@ keywords:
   - OpenJev-HF
   - Qwen3.5
   - SGLang
+  - LangChain
+  - agent harness
+  - tool safety
   - LocalJev
   - DiffusionGemma
   - Bun

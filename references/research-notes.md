@@ -35,6 +35,8 @@ guidance. The live pages remain authoritative.
 - Community OpenJev local scorer: <https://github.com/daseinlabs/open-jev>
 - OpenJev open-weight NLI model card and SGLang server: <https://huggingface.co/AlexWortega/openjev>
 - Community LocalJev Bun bridge: <https://github.com/githubnext/localjev>
+- LangChain Jev harness article: <https://www.langchain.com/blog/building-a-harness-with-jev>
+- LangChain TypeSafe integration package: <https://pypi.org/project/langchain-typesafe/>
 - Jev-class model comparison and JevBench protocol: <https://benchmarkheaven.com/jev-models>
 - vLLM structured outputs: <https://docs.vllm.ai/en/latest/features/structured_outputs/>
 - Ollama structured outputs: <https://github.com/ollama/ollama/blob/main/docs/capabilities/structured-outputs.mdx>
@@ -247,6 +249,35 @@ The bridge is portable, but its probabilities are generated/self-reported by
 the model and therefore are not mathematically equivalent to OpenJev's direct
 logit read. The harness exposes it as `--provider localjev` so its calibration,
 latency, retries, and review rate remain visible as a separate model path.
+
+### LangChain agent integration
+
+LangChain's Jev integration is a separate hosted control-plane surface. The
+official package exposes `TypeSafeClassifier` as a LangChain Runnable and
+supports `Noul`, `Choice`, and `Score` question objects. Its experimental
+middleware currently includes:
+
+- `ModelRouterMiddleware`: classify the latest human message in `before_agent`,
+  store the complete `ChoiceAnswer`, and use the selected model for every model
+  call in that run.
+- `AutoModeMiddleware`: classify configured tool calls immediately before
+  execution, block calls at or above its risk threshold, and fail closed when
+  classification fails. Tools not listed in the middleware configuration pass
+  through.
+
+This makes Jev a control-plane classifier, not the agent's generative model.
+The middleware does not establish authorization, ask a human for approval, or
+enforce path, credential, spend, or side-effect policy. Keep those controls in
+deterministic runtime code. Treat tool arguments, web content, files, and
+model output as attacker-reachable state and evaluate prompt-injection cases.
+
+The package's experimental extra currently requires the LangChain agent
+framework and is version-sensitive. Keep it optional in Jev Skill: hosted
+LangChain calls use `langchain-typesafe`, while local `openjev`, `openjev-hf`,
+and `localjev` remain measured through this repository's provider harness.
+Do not compare a middleware's tool-block rate with model accuracy without
+recording the agent outcome, false blocks, bypassing tools, and policy
+overrides.
 
 Structured decoding is a syntax guarantee, not a semantic truth guarantee.
 The strongest practical stack implemented here is:
