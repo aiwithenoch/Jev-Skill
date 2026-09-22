@@ -243,6 +243,16 @@ not OpenJev's direct logit-reading extensions. Its probabilities are prompted
 and self-reported, so compare its calibration separately and keep review gates
 enabled for consequential decisions.
 
+The native adapter also supports `von`, `litjev`, and `simple-jev`. These
+projects document the same `/v1/systemone` transport, but their probability
+semantics differ: Von is a native decision scorer, LitJev reads direct label
+logits, and Simple-JEV reads next-token logits. Their provider metadata and
+calibration status are recorded in the report so wire compatibility is not
+mistaken for model equivalence. Laya and poorjev are useful in-process research
+references, but are not silently treated as this transport. Read the
+[ecosystem map](references/ecosystem.md) before making model, benchmark, or
+license claims.
+
 Ollama uses its native structured-output endpoint:
 
 ```bash
@@ -278,6 +288,14 @@ Score, ensemble agreement, verifier support, latency, retries, and token
 accounting. For production guardrails, use `--max-state-bytes` to prevent
 context/privacy blowups and `--max-warning-rate` to fail CI when too many cases
 need repair, omit usage, or otherwise emit warnings.
+
+Fit deployment-specific temperature scaling with
+`scripts/fit_calibration.py` on a calibration-tagged split, then apply the
+profile with `--calibration-profile` on untouched cases. The fitter scales the
+typed probabilities already returned by the selected provider; it does not
+recover hidden logits or make calibration transfer across a changed model,
+domain, language, quantization, or option count. Use
+`scripts/compare_reports.py` only when report question/case hashes match.
 
 When a task needs current SDK syntax, limits, model aliases, or cookbook
 details, read the live page linked above instead of relying on this summary.

@@ -7,7 +7,9 @@ reviewed golden sets. It supports TypeSafe Jev, the community OpenJev native
 server, the open-weight OpenJev-HF checkpoint through SGLang, the LocalJev Bun
 bridge, local Ollama, and OpenAI-compatible runtimes such as vLLM, LM Studio,
 and llama.cpp server.
-It also documents the optional official LangChain integration for using Jev as
+It also supports native `/v1/systemone` adapters for Von, LitJev, and
+Simple-JEV, plus dependency-free calibration fitting and matched-report
+comparison. It documents the optional official LangChain integration for using Jev as
 an agent routing and pre-tool decision layer.
 The included harness validates Noul, Choice, and Score answers; can aggregate
 independent samples; can run a typed verifier; and marks uncertain cases for

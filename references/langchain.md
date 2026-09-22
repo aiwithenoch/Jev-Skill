@@ -128,7 +128,8 @@ approval UI.
 ## Local-provider boundary
 
 `langchain-typesafe` calls the hosted TypeSafe API. It does not automatically
-use this repository's `openjev`, `openjev-hf`, or `localjev` providers. Those
+use this repository's `openjev`, `openjev-hf`, `localjev`, `von`, `litjev`, or
+`simple-jev` providers. Those
 providers remain available through `scripts/jev_harness.py` for local golden
 set evaluation. If an application needs a local LangChain Runnable, wrap the
 same typed request contract in an application-owned adapter and keep its

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import jev_harness as harness  # noqa: E402
+from jev_calibration import apply_calibration_profile, fit_temperature, scale_binary_probability  # noqa: E402
 
 
 QUESTIONS = harness.validate_questions(
@@ -196,6 +197,61 @@ class OpenJevHFHandler(BaseHTTPRequestHandler):
 
 
 class HarnessTests(unittest.TestCase):
+    def test_provider_registry_describes_native_systemone_variants(self):
+        for provider in ("openjev", "localjev", "von", "litjev", "simple-jev"):
+            self.assertIn(provider, harness.PROVIDERS)
+            self.assertIn(provider, harness.NATIVE_JEV_PROVIDERS)
+            self.assertEqual(harness.local_endpoint(provider, "http://127.0.0.1:8000"), "http://127.0.0.1:8000/v1/systemone")
+            capabilities = harness.provider_capabilities(provider)
+            self.assertEqual(capabilities["protocol"], "systemone")
+            self.assertIn("probability_semantics", capabilities)
+
+    def test_calibration_profile_binding_rejects_wrong_model(self):
+        profile = {
+            "source": {"provider": "von", "model": "von-old", "question_sha256": "q"}
+        }
+        with self.assertRaises(ValueError):
+            harness.calibration_binding_warnings(
+                profile,
+                provider="von",
+                model="von-new",
+                question_sha256="q",
+            )
+
+    def test_temperature_scaling_softens_overconfident_predictions(self):
+        samples = [
+            {"kind": "binary", "probability": 0.9, "label": True},
+            {"kind": "binary", "probability": 0.9, "label": False},
+            {"kind": "binary", "probability": 0.8, "label": True},
+            {"kind": "binary", "probability": 0.8, "label": False},
+        ]
+        temperature = fit_temperature(samples, minimum=0.1, maximum=20.0)
+        self.assertGreater(temperature, 1.0)
+        self.assertLess(scale_binary_probability(0.9, temperature), 0.9)
+
+    def test_calibration_profile_recomputes_typed_answers(self):
+        response = {"model": "fake", "answers": candidate_answers(False)}
+        profile = {
+            "schema_version": "jev-calibration-v1",
+            "profile_id": "test-profile",
+            "temperatures": {"noul": 2.0, "choice": 2.0, "score": 2.0},
+        }
+        calibrated, warnings = apply_calibration_profile(response, QUESTIONS, profile)
+        self.assertEqual(len(warnings), 1)
+        self.assertLess(calibrated["answers"]["urgent"]["noul"], 0.95)
+        self.assertAlmostEqual(sum(calibrated["answers"]["team"]["probabilities"].values()), 1.0)
+        self.assertAlmostEqual(
+            calibrated["answers"]["severity"]["score"],
+            sum(float(key) * value for key, value in calibrated["answers"]["severity"]["probabilities"].items()),
+        )
+        harness.validate_response(calibrated, QUESTIONS)
+
+    def test_score_probability_drift_is_rejected(self):
+        answer = candidate_answers(False)
+        answer["severity"]["score"] = 2.0
+        with self.assertRaises(ValueError):
+            harness.validate_response({"model": "fake", "answers": answer}, QUESTIONS)
+
     def test_strict_json_and_aggregation(self):
         with self.assertRaises(ValueError):
             harness.parse_local_json("Here is the answer: {\"ok\": true}", allow_repair=False)

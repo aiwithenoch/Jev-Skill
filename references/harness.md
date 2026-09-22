@@ -1,10 +1,10 @@
 # Jev evaluation harness
 
 `scripts/jev_harness.py` is a small, dependency-free runner for Jev golden
-sets. It validates typed question definitions, calls TypeSafe, OpenJev,
-LocalJev, or a local Ollama/OpenAI-compatible endpoint concurrently, and reports accuracy,
-calibration, reliability, latency, and token usage. It does not print state or
-API keys.
+sets. It validates typed question definitions, calls TypeSafe, OpenJev, Von,
+LitJev, Simple-JEV, LocalJev, or a local Ollama/OpenAI-compatible endpoint
+concurrently, and reports accuracy, calibration, reliability, latency, and
+token usage. It does not print state or API keys.
 
 ## Input files
 
@@ -159,6 +159,23 @@ logits. Keep it as a separate provider in comparisons and calibrate it on the
 same labeled cases. Its own queue and in-flight limits should be respected;
 start with `--concurrency 1` or `2`.
 
+The native adapter also accepts `--provider von`, `--provider litjev`, and
+`--provider simple-jev`. Their documented defaults are all port `8000`; pass
+the model identifier loaded by the server:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider von --model von-latest \
+  --base-url http://127.0.0.1:8000 \
+  --questions questions.json --cases cases.jsonl
+```
+
+The reports intentionally label these providers differently. Von is a native
+decision scorer, LitJev uses direct label logits, and Simple-JEV uses next-token
+logits. Transport compatibility is not probability or accuracy parity. See
+the [ecosystem map](ecosystem.md) for licenses, upstream claims, and the
+in-process Laya/poorjev/NanoJev projects that need custom adapters.
+
 For llama.cpp's direct JSON-schema request shape, add
 `--structured-protocol llama.cpp`. Local API keys are optional; if a server
 requires one, put it in the environment variable named by `--api-key-env`
@@ -191,6 +208,39 @@ Local reliability controls:
   providing a simple context and privacy guardrail.
 - `--max-warning-rate` fails CI when too many cases emit non-fatal warnings,
   such as missing usage or explicitly enabled JSON repair.
+
+### Calibration profiles
+
+Fit temperature scaling on a separate labeled slice. The default fitter uses
+cases tagged `calibration` and requires 20 answers per primitive so a profile
+is not silently created from a handful of examples:
+
+```bash
+python3 scripts/fit_calibration.py calibration-run.json \
+  --output temperature-profile.json
+
+python3 scripts/jev_harness.py \
+  --provider von --model von-latest \
+  --calibration-profile temperature-profile.json \
+  --questions questions.json --cases heldout-cases.jsonl \
+  --output heldout-report.json
+```
+
+The profile stores only fitting metadata and temperatures. Temperature scaling
+recomputes Noul probabilities and Choice/Score distributions, then recomputes
+the selected answer and Score expectation. It does not recover hidden logits;
+refit after changing provider, checkpoint, domain, language, quantization, or
+option cardinality. Use `--by-question` only when each question has enough
+calibration examples.
+
+Compare matched reports with:
+
+```bash
+python3 scripts/compare_reports.py report-a.json report-b.json
+```
+
+The comparator refuses different question/case hashes or tag filters unless
+`--allow-mismatch` is explicitly supplied.
 
 For a reproducible benchmark, pin the resolved model version; use the alias
 for a moving canary:
@@ -225,12 +275,13 @@ The runner validates the documented response contract before scoring: every
 question must have a matching typed answer; Choice probabilities must cover
 the criteria; Score legends and probability keys must cover every level; all
 probabilities, confidence values, scores, and token counts must be finite and
-in range. It reports Noul accuracy, Brier score, log loss, precision/recall/F1
-and a confusion matrix; Choice accuracy, confidence and confusion; Score level
+in range. It reports Noul accuracy, Brier score, log loss, reliability/ECE,
+precision/recall/F1 and a confusion matrix; Choice accuracy, confidence and confusion; Score level
 accuracy, tolerance hit rate, MAE and RMSE; expected calibration error and
 confidence-threshold selective coverage; per-question and per-tag slices; plus
 mean/p50/p95 latency, state byte sizes, retry attempts, resolved model IDs,
-request IDs, and token totals. Missing usage is recorded as a warning, not a
+request IDs, and token totals. Provider architecture, probability semantics,
+and calibration status are recorded alongside the metrics. Missing usage is recorded as a warning, not a
 false response failure, because the SDK response surface allows usage to be
 absent. The summary also includes Wilson 95% accuracy intervals, provider and
 sample counts, ensemble agreement, verifier support, and the fraction of

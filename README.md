@@ -60,6 +60,9 @@ included harness lets the same Noul/Choice/Score question set run against:
   `/classify` endpoint, with NLI logits adapted to typed decisions
 - LocalJev's TypeScript/Bun bridge (`POST /v1/systemone`) backed by an
   OpenAI-compatible DiffusionGemma endpoint
+- [Von](https://github.com/wfzyx/von), [LitJev](https://github.com/zhengxuyu/litjev),
+  and [Simple-JEV](https://github.com/featherless-ai/simple-jev), each through
+  its documented native `POST /v1/systemone` route
 - Ollama native structured outputs (`POST /api/chat`)
 - OpenAI-compatible local servers such as vLLM, LM Studio, and llama.cpp
 
@@ -213,6 +216,71 @@ LocalJev is wire-compatible but its probabilities are generated and
 self-reported by the upstream model; they are not equivalent to reading
 OpenJev logits. Treat its calibration as a separate benchmark result.
 
+### More native System One runtimes
+
+The same native adapter also supports the open-source `von`, `litjev`, and
+`simple-jev` providers. The harness records each provider's protocol,
+architecture, probability semantics, and calibration status in every report:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider von --model von-latest --base-url http://127.0.0.1:8000 \
+  --questions questions.json --cases cases.jsonl --output von-report.json
+
+python3 scripts/jev_harness.py \
+  --provider litjev --model litjev --base-url http://127.0.0.1:8000 \
+  --questions questions.json --cases cases.jsonl --output litjev-report.json
+
+python3 scripts/jev_harness.py \
+  --provider simple-jev --model Qwen/Qwen3.5-2B \
+  --base-url http://127.0.0.1:8000 \
+  --questions questions.json --cases cases.jsonl --output simple-jev-report.json
+```
+
+These are transport-compatible, not model-equivalent. Von's repository
+describes an Apache-2.0 native decision scorer; LitJev documents direct label
+logits and says its probabilities are not calibrated by default; Simple-JEV
+documents a next-token-logit classifier. Verify the exact upstream revision,
+checkpoint, hardware, and calibration on your own golden set. See the full
+[ecosystem map](references/ecosystem.md).
+
+### Fit calibration instead of trusting confidence
+
+Use a separate set tagged `calibration`, then apply the fitted profile to a
+fresh run:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider von --model von-latest \
+  --questions questions.json --cases cases.jsonl --tag calibration \
+  --output von-calibration-run.json
+
+python3 scripts/fit_calibration.py von-calibration-run.json \
+  --output von-temperature.json
+
+python3 scripts/jev_harness.py \
+  --provider von --model von-latest \
+  --calibration-profile von-temperature.json \
+  --questions questions.json --cases heldout-cases.jsonl \
+  --output von-heldout.json
+```
+
+The fitter uses dependency-free temperature scaling over the typed
+probabilities already exposed by the provider. It does not recover hidden
+logits or make calibration transfer to a different model, domain, language,
+option count, or quantization. The harness also rejects materially inconsistent
+Score values instead of scoring a fabricated score against its distribution.
+
+### Compare only matched reports
+
+```bash
+python3 scripts/compare_reports.py von-heldout.json litjev-heldout.json
+```
+
+The comparison tool refuses to mix reports with different question/case hashes
+or tag filters, and exposes provider semantics beside accuracy, calibration,
+review rate, warnings, and p95 latency.
+
 ## LangChain agent harness
 
 The official `langchain-typesafe` integration exposes Jev as a LangChain
@@ -281,7 +349,8 @@ The harness composes the following layers without asking the model for a chain
 of thought:
 
 1. schema-constrained JSON where the provider supports it;
-2. strict typed response validation and finite/range checks;
+2. strict typed response validation, finite/range checks, normalized distributions,
+   and Score/distribution integrity checks;
 3. independent sample aggregation over typed distributions;
 4. consensus measurement and review routing;
 5. an optional second typed verifier over evidence and candidate answers;
@@ -301,7 +370,7 @@ repository root:
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m py_compile scripts/jev_harness.py
+python3 -m py_compile scripts/jev_harness.py scripts/jev_calibration.py scripts/fit_calibration.py scripts/compare_reports.py
 python3 /Users/admin/.codex/skills/.system/skill-creator/scripts/quick_validate.py .
 ```
 
@@ -313,15 +382,16 @@ golden sets kept out of version control.
 
 ### Does Jev Skill require the Jev API?
 
-No. It can run against OpenJev, LocalJev, Ollama, vLLM, LM Studio, or llama.cpp server.
+No. It can run against OpenJev, Von, LitJev, Simple-JEV, LocalJev, Ollama,
+vLLM, LM Studio, or llama.cpp server.
 The Jev API gives you Jev's model; local providers give you the same typed
 contract and reliability harness using the model you run.
 
 ### Does it make a local model as intelligent as Jev?
 
-No. It cannot change model weights. It can run the openjev checkpoint directly
-or wrap another local model, then make the resulting decisions more
-structured, testable, measurable, and safer to deploy.
+No. It cannot change model weights. It can run native open decision servers or
+wrap another local model, then make the resulting decisions more structured,
+testable, measurable, calibrated, and safer to deploy.
 
 ### Can Codex or Claude Code use it?
 
@@ -338,15 +408,16 @@ distribution. Your application still owns the final policy and side effects.
 
 ## Roadmap
 
+- Conformal/coverage-aware threshold selection for domain-specific costs.
 - More provider adapters and reproducible local benchmark packs.
-- Calibration fitting and threshold selection for domain-specific costs.
 - Shared adversarial and metamorphic case libraries.
 - First-class integrations for AI coding agents and CI platforms.
 
 ## Research and design notes
 
 See [SKILL.md](SKILL.md), [references/harness.md](references/harness.md), and
-[references/research-notes.md](references/research-notes.md). The notes link
+[references/research-notes.md](references/research-notes.md), plus the
+[ecosystem map](references/ecosystem.md). The notes link
 the official TypeSafe docs, local structured-output APIs, evaluation
 frameworks, self-consistency/verifier research, and calibration references.
 

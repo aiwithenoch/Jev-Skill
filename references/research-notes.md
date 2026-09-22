@@ -1,6 +1,6 @@
 # Jev Skill research notes
 
-Research date: 2026-09-20.
+Research date: 2026-09-22.
 
 These notes distill the current official TypeSafe documentation into routing
 guidance. The live pages remain authoritative.
@@ -35,6 +35,14 @@ guidance. The live pages remain authoritative.
 - Community OpenJev local scorer: <https://github.com/daseinlabs/open-jev>
 - OpenJev open-weight NLI model card and SGLang server: <https://huggingface.co/AlexWortega/openjev>
 - Community LocalJev Bun bridge: <https://github.com/githubnext/localjev>
+- Von open System One decision server: <https://github.com/wfzyx/von>
+- Laya open non-autoregressive decision engine: <https://github.com/NandhaKishorM/laya>
+- LitJev Qwen decision-layer reproduction: <https://github.com/zhengxuyu/litjev>
+- Simple-JEV next-token-logit server: <https://github.com/featherless-ai/simple-jev>
+- poorjev calibration-first local decision layer: <https://github.com/rupeshpoojary9/poorjev>
+- NanoJev parallel game decision model: <https://github.com/TianyuCodings/NanoJev>
+- JevBench benchmark repository: <https://github.com/fstandhartinger/jevbench>
+- OpenLayer jevals agent evaluation/guardrails: <https://github.com/openlayer-ai/jevals>
 - LangChain Jev harness article: <https://www.langchain.com/blog/building-a-harness-with-jev>
 - LangChain TypeSafe integration package: <https://pypi.org/project/langchain-typesafe/>
 - Jev-class model comparison and JevBench protocol: <https://benchmarkheaven.com/jev-models>
@@ -249,6 +257,49 @@ The bridge is portable, but its probabilities are generated/self-reported by
 the model and therefore are not mathematically equivalent to OpenJev's direct
 logit read. The harness exposes it as `--provider localjev` so its calibration,
 latency, retries, and review rate remain visible as a separate model path.
+
+### Additional open implementations
+
+The ecosystem now has several native or near-native implementations. The
+harness registers the providers whose repositories document the TypeSafe-shaped
+`POST /v1/systemone` route:
+
+- **Von** (`wfzyx/von`) documents an Apache-2.0 local server, a native route,
+  direct typed answers, and post-training temperature scaling. Its accuracy,
+  speed, and calibration numbers are upstream claims until reproduced under
+  this repository's matched cases.
+- **LitJev** (`zhengxuyu/litjev`) runs Qwen checkpoints and reads label scores
+  directly from the output head. Its documentation explicitly says the raw
+  probabilities are not calibrated by default; treat it as a separate direct
+  logit model, not TypeSafe weights.
+- **Simple-JEV** (`featherless-ai/simple-jev`) reads selected next-token logits
+  and exposes `/v1/systemone` as an alias of `/v1/classifier`. It is Apache-2.0
+  code, but token-boundary, prompt-template, branch-count, and context limits
+  remain model/server constraints.
+
+**Laya** (`NandhaKishorM/laya`) is an in-process Python decision engine with
+Apache-2.0 code and checkpoint-specific language/cardinality constraints. The
+Simple-JEV server can load a Laya backend, which is the cleanest way to bring
+it under this harness without inventing a new in-process dependency path.
+Laya's own benchmark notes that high-cardinality choices and raw calibration
+need special treatment.
+
+**poorjev** (`rupeshpoojary9/poorjev`) is a separate MIT-licensed local layer
+whose strongest contribution is reproducible calibration and abstention
+measurement. It exposes Python/MCP primitives rather than the harness's native
+HTTP route, so Jev Skill does not claim a first-class adapter for it yet.
+
+**NanoJev** (`TianyuCodings/NanoJev`) is a MIT-licensed, task-specific parallel
+decision project with its own `/api/evaluate` service and game-heavy releases.
+Its architecture is worth studying for batch/action distributions, but its
+results should not be pooled with general typed-decision accuracy without a
+matched adapter and task split.
+
+The implementation details and fair-comparison rules are consolidated in
+[ecosystem.md](ecosystem.md). The new `fit_calibration.py` utility deliberately
+fits only on labeled harness reports and stores no raw state; the new
+`compare_reports.py` utility refuses mismatched question/case hashes by
+default.
 
 ### LangChain agent integration
 

@@ -10,6 +10,7 @@ metrics without including input state or API keys in the report.
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 import hashlib
 import json
@@ -26,12 +27,108 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from jev_calibration import CalibrationError, apply_calibration_profile, load_profile
 
-HARNESS_VERSION = "2.6.0"
+
+HARNESS_VERSION = "2.7.0"
 API_URL = "https://api.typesafe.ai/v1/systemone"
 QUESTION_TYPES = {"noul", "choice", "score"}
-PROVIDERS = {"typesafe", "openai-compatible", "ollama", "openjev", "openjev-hf", "localjev"}
-NATIVE_JEV_PROVIDERS = {"openjev", "localjev"}
+PROVIDER_SPECS: dict[str, dict[str, Any]] = {
+    "typesafe": {
+        "protocol": "typesafe-hosted",
+        "execution": "hosted",
+        "architecture": "proprietary-decision-model",
+        "probability_semantics": "provider-native",
+        "calibration_status": "provider-managed",
+        "default_base_url": API_URL,
+        "default_model": "jev-latest",
+        "source": "https://docs.typesafe.ai/api.md",
+    },
+    "openai-compatible": {
+        "protocol": "openai-chat-completions",
+        "execution": "local-or-remote",
+        "architecture": "autoregressive-json-wrapper",
+        "probability_semantics": "self-reported-json",
+        "calibration_status": "must-fit-locally",
+        "default_base_url": "http://127.0.0.1:8000/v1",
+        "default_model": "local-model",
+        "source": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+    },
+    "ollama": {
+        "protocol": "ollama-chat",
+        "execution": "local",
+        "architecture": "autoregressive-json-wrapper",
+        "probability_semantics": "self-reported-json",
+        "calibration_status": "must-fit-locally",
+        "default_base_url": "http://127.0.0.1:11434",
+        "default_model": "qwen3:8b",
+        "source": "https://github.com/ollama/ollama/blob/main/docs/capabilities/structured-outputs.mdx",
+    },
+    "openjev": {
+        "protocol": "systemone",
+        "execution": "local",
+        "architecture": "native-decision-scorer",
+        "probability_semantics": "provider-native",
+        "calibration_status": "must-fit-locally",
+        "default_base_url": "http://127.0.0.1:8000",
+        "default_model": "jev-local",
+        "source": "https://github.com/daseinlabs/open-jev",
+    },
+    "openjev-hf": {
+        "protocol": "sglang-classify",
+        "execution": "local",
+        "architecture": "nli-cross-encoder-adapter",
+        "probability_semantics": "nli-derived",
+        "calibration_status": "uncalibrated-unless-fitted",
+        "default_base_url": "http://127.0.0.1:30000",
+        "default_model": "qwen3.5-0.8b-nli-v2s-long",
+        "source": "https://huggingface.co/AlexWortega/openjev",
+    },
+    "localjev": {
+        "protocol": "systemone",
+        "execution": "local",
+        "architecture": "prompted-bridge",
+        "probability_semantics": "self-reported-json",
+        "calibration_status": "must-fit-locally",
+        "default_base_url": "http://127.0.0.1:8080",
+        "default_model": "localjev-latest",
+        "source": "https://github.com/githubnext/localjev",
+    },
+    "von": {
+        "protocol": "systemone",
+        "execution": "local",
+        "architecture": "native-decision-scorer",
+        "probability_semantics": "provider-native",
+        "calibration_status": "upstream-claims-calibration-reverify",
+        "default_base_url": "http://127.0.0.1:8000",
+        "default_model": "von-latest",
+        "source": "https://github.com/wfzyx/von",
+    },
+    "litjev": {
+        "protocol": "systemone",
+        "execution": "local",
+        "architecture": "direct-label-logit-adapter",
+        "probability_semantics": "direct-label-logits",
+        "calibration_status": "uncalibrated-by-default",
+        "default_base_url": "http://127.0.0.1:8000",
+        "default_model": "litjev",
+        "source": "https://github.com/zhengxuyu/litjev",
+    },
+    "simple-jev": {
+        "protocol": "systemone",
+        "execution": "local",
+        "architecture": "next-token-logit-adapter",
+        "probability_semantics": "next-token-logits",
+        "calibration_status": "uncalibrated-by-default",
+        "default_base_url": "http://127.0.0.1:8000",
+        "default_model": "Qwen/Qwen3.5-2B",
+        "source": "https://github.com/featherless-ai/simple-jev",
+    },
+}
+PROVIDERS = set(PROVIDER_SPECS)
+NATIVE_JEV_PROVIDERS = {
+    provider for provider, spec in PROVIDER_SPECS.items() if spec["protocol"] == "systemone"
+}
 TRANSIENT_HTTP_CODES = {408, 429, 500, 502, 503, 504, 529}
 REQUEST_ID_HEADERS = ("x-typesafe-request-id", "x-request-id", "request-id")
 CALIBRATION_THRESHOLDS = (0.5, 0.6, 0.7, 0.8, 0.9)
@@ -49,6 +146,48 @@ class RequestError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         self.request_id = request_id
+
+
+def provider_capabilities(provider: str) -> dict[str, Any]:
+    """Return a copy so reports cannot mutate the registry."""
+
+    try:
+        return copy.deepcopy(PROVIDER_SPECS[provider])
+    except KeyError as exc:  # defensive for callers that bypass argparse
+        raise ValueError(f"unknown provider {provider!r}") from exc
+
+
+def calibration_binding_warnings(
+    profile: dict[str, Any],
+    *,
+    provider: str,
+    model: str,
+    question_sha256: str,
+) -> list[str]:
+    """Check that a generated profile belongs to this deployment target."""
+
+    source = profile.get("source")
+    if not isinstance(source, dict):
+        return ["calibration profile has no source binding metadata"]
+    mismatches = []
+    for field, actual in (
+        ("provider", provider),
+        ("model", model),
+        ("question_sha256", question_sha256),
+    ):
+        expected = source.get(field)
+        if expected is not None and expected != actual:
+            mismatches.append(f"{field} {expected!r} does not match current {actual!r}")
+    if mismatches:
+        raise CalibrationError("calibration profile is bound to a different deployment: " + "; ".join(mismatches))
+    warnings: list[str] = []
+    if source.get("provider") is None:
+        warnings.append("calibration profile has no provider binding metadata")
+    if source.get("model") is None:
+        warnings.append("calibration profile has no model binding metadata")
+    if source.get("question_sha256") is None:
+        warnings.append("calibration profile has no question binding metadata")
+    return warnings
 
 
 def fail(message: str) -> None:
@@ -428,9 +567,10 @@ def request_native_jev(
 ) -> tuple[dict[str, Any], str | None, int, list[str]]:
     """Call a local Jev-compatible server's native typed endpoint.
 
-    OpenJev performs option scoring locally. LocalJev is a TypeScript/Bun bridge
-    that asks an OpenAI-compatible model for probability JSON. Both return typed
-    answers directly, so neither needs the harness chat-completion prompt path.
+    OpenJev, Von, LitJev, and Simple-JEV expose the typed route directly.
+    LocalJev is a TypeScript/Bun bridge that asks an OpenAI-compatible model for
+    probability JSON. These providers return typed answers directly, so none
+    needs the harness chat-completion prompt path.
     """
     headers = {
         "Accept": "application/json",
@@ -446,7 +586,7 @@ def request_native_jev(
         timeout,
         retries,
         max_backoff,
-        "LocalJev" if provider == "localjev" else "OpenJev",
+        provider,
     )
     if not isinstance(envelope, dict):
         raise RuntimeError(f"{provider} returned a non-object response")
@@ -672,11 +812,13 @@ def validate_distribution(value: Any, expected_keys: set[str], label: str, warni
         if not 0 <= numeric <= 1:
             raise ValueError(f"{label} probability {key!r} must be between 0 and 1")
         probabilities[key] = numeric
-    total = sum(probabilities.values())
+    total = math.fsum(probabilities.values())
     if abs(total - 1.0) > 0.02:
         raise ValueError(f"{label} probabilities sum to {total:.6f}, not 1")
     if abs(total - 1.0) > 1e-6:
         warnings.append(f"{label} probabilities sum to {total:.6f} after rounding")
+    if abs(total - 1.0) > 1e-12:
+        probabilities = {key: value / total for key, value in probabilities.items()}
     return probabilities
 
 
@@ -699,7 +841,8 @@ def validate_answer(question: dict[str, Any], answer: Any, question_id: str, war
         criteria = question["criteria"]
         if choice not in criteria:
             raise ValueError(f"answer {question_id!r}.choice is not in the question criteria")
-        validate_distribution(answer.get("probabilities"), set(criteria), f"answer {question_id!r}", warnings)
+        probabilities = validate_distribution(answer.get("probabilities"), set(criteria), f"answer {question_id!r}", warnings)
+        answer["probabilities"] = probabilities
         return
     score = require_finite_number(answer.get("score"), f"answer {question_id!r}.score")
     level_count = len(question["criteria"])
@@ -709,7 +852,20 @@ def validate_answer(question: dict[str, Any], answer: Any, question_id: str, war
     legend = answer.get("legend")
     if not isinstance(legend, dict) or set(legend) != expected_keys:
         raise ValueError(f"answer {question_id!r}.legend must contain every score level")
-    validate_distribution(answer.get("probabilities"), expected_keys, f"answer {question_id!r}", warnings)
+    probabilities = validate_distribution(answer.get("probabilities"), expected_keys, f"answer {question_id!r}", warnings)
+    answer["probabilities"] = probabilities
+    expected_score = sum(float(key) * probabilities[key] for key in expected_keys)
+    score_drift = abs(score - expected_score)
+    if score_drift > 0.05:
+        raise ValueError(
+            f"answer {question_id!r}.score differs from its probability-weighted value "
+            f"by {score_drift:.6f}"
+        )
+    if score_drift > 1e-3:
+        warnings.append(
+            f"answer {question_id!r}.score rounded away from its probability-weighted value "
+            f"by {score_drift:.6f}"
+        )
 
 
 def validate_response(response: Any, questions: dict[str, dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
@@ -877,6 +1033,7 @@ def run_case(case: dict[str, Any], questions: dict[str, dict[str, Any]], options
     started = time.perf_counter()
     provider = options["provider"]
     model = options["model"]
+    calibration_profile = options.get("calibration_profile")
     payload = {"state": case["state"], "model": model, "questions": questions}
     state_bytes = json_size(case["state"])
     try:
@@ -885,7 +1042,7 @@ def run_case(case: dict[str, Any], questions: dict[str, dict[str, Any]], options
         responses: list[dict[str, Any]] = []
         request_ids: list[str] = []
         attempts: list[int] = []
-        warnings: list[str] = []
+        warnings: list[str] = list(options.get("calibration_binding_warnings", []))
         sample_errors: list[str] = []
         sample_count = options["samples"]
         for sample_index in range(sample_count):
@@ -908,11 +1065,19 @@ def run_case(case: dict[str, Any], questions: dict[str, dict[str, Any]], options
                     options["allow_json_repair"],
                 )
                 response, response_warnings = validate_response(response, questions)
+                calibration_warnings: list[str] = []
+                if calibration_profile is not None:
+                    response, calibration_warnings = apply_calibration_profile(response, questions, calibration_profile)
+                    response, post_calibration_warnings = validate_response(response, questions)
+                    calibration_warnings.extend(post_calibration_warnings)
                 responses.append(response)
                 if request_id:
                     request_ids.append(request_id)
                 attempts.append(attempt_count)
-                warnings.extend([f"sample {sample_index + 1}: {warning}" for warning in transport_warnings + response_warnings])
+                warnings.extend([
+                    f"sample {sample_index + 1}: {warning}"
+                    for warning in transport_warnings + response_warnings + calibration_warnings
+                ])
             except Exception as exc:  # preserve per-sample failures when enough valid samples remain
                 sample_errors.append(f"sample {sample_index + 1}: {exc}")
                 remaining = sample_count - sample_index - 1
@@ -1005,6 +1170,10 @@ def run_case(case: dict[str, Any], questions: dict[str, dict[str, Any]], options
             "verifier_request_id": verifier_request_id,
             "verifier_attempts": verifier_attempts,
             "warnings": warnings,
+            "calibration": {
+                "applied": calibration_profile is not None,
+                "profile_id": calibration_profile.get("profile_id") if calibration_profile else None,
+            },
         }
         return record
     except Exception as exc:  # noqa: BLE001 - preserve a case-level failure in the report
@@ -1120,6 +1289,39 @@ def confidence_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def probability_calibration_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reliability metrics for Noul's direct yes-probability."""
+
+    bins: list[dict[str, Any]] = []
+    ece = 0.0
+    for index in range(10):
+        lower = index / 10
+        upper = (index + 1) / 10
+        bucket = [
+            item
+            for item in items
+            if lower <= float(item["yes_probability"]) < upper
+            or (index == 9 and float(item["yes_probability"]) == upper)
+        ]
+        probabilities = [float(item["yes_probability"]) for item in bucket]
+        outcomes = [1.0 if item["expected"] else 0.0 for item in bucket]
+        mean_probability = mean(probabilities)
+        observed_rate = mean(outcomes)
+        if bucket:
+            ece += len(bucket) / len(items) * abs((mean_probability or 0.0) - (observed_rate or 0.0))
+        bins.append({
+            "lower": lower,
+            "upper": upper,
+            "count": len(bucket),
+            "mean_probability": mean_probability,
+            "observed_rate": observed_rate,
+        })
+    return {
+        "ece": round(ece, 6) if items else None,
+        "reliability_bins": bins,
+    }
+
+
 def summarize_evaluations(items: list[dict[str, Any]], question_type: str) -> dict[str, Any]:
     correct = [item for item in items if item.get("correct") is True]
     result: dict[str, Any] = {
@@ -1131,6 +1333,7 @@ def summarize_evaluations(items: list[dict[str, Any]], question_type: str) -> di
         briers = [float(item["brier"]) for item in items]
         log_losses = [float(item["log_loss"]) for item in items]
         result.update({"brier": mean(briers), "log_loss": mean(log_losses)})
+        result.update(probability_calibration_metrics(items))
     elif question_type in {"choice", "score"}:
         result.update(confidence_metrics(items))
         if question_type == "choice":
@@ -1176,6 +1379,16 @@ def summarize(records: list[dict[str, Any]], questions: dict[str, dict[str, Any]
     ]
     warning_count = sum(len(record.get("warnings", [])) for record in records if isinstance(record.get("warnings"), list))
     warning_cases = sum(bool(record.get("warnings")) for record in records)
+    providers_seen = sorted({
+        record.get("provider")
+        for record in records
+        if isinstance(record.get("provider"), str) and record.get("provider") in PROVIDER_SPECS
+    })
+    capability_summary: dict[str, Any]
+    if len(providers_seen) == 1:
+        capability_summary = provider_capabilities(providers_seen[0])
+    else:
+        capability_summary = {provider: provider_capabilities(provider) for provider in providers_seen}
     summary: dict[str, Any] = {
         "cases": len(records),
         "successful_cases": len(successful),
@@ -1187,6 +1400,7 @@ def summarize(records: list[dict[str, Any]], questions: dict[str, dict[str, Any]
         "accuracy_ci95": wilson_interval(len(correct), len(evaluations)),
         "models": dict(model_counts),
         "providers": dict(provider_counts),
+        "provider_capabilities": capability_summary,
         "requests_with_ids": sum(bool(record.get("request_id")) for record in records),
         "review_required_cases": review_required_cases,
         "review_rate": round(review_required_cases / len(successful), 6) if successful else None,
@@ -1235,6 +1449,19 @@ def summarize(records: list[dict[str, Any]], questions: dict[str, dict[str, Any]
             "total": int(sum(state_bytes)) if state_bytes else None,
             "mean": mean(state_bytes),
             "max": max(state_bytes) if state_bytes else None,
+        },
+        "calibration": {
+            "cases_with_profile": sum(
+                record.get("calibration", {}).get("applied") is True
+                for record in successful
+                if isinstance(record.get("calibration"), dict)
+            ),
+            "profile_ids": sorted({
+                record.get("calibration", {}).get("profile_id")
+                for record in successful
+                if isinstance(record.get("calibration"), dict)
+                and record.get("calibration", {}).get("profile_id")
+            }),
         },
     }
     if input_price is not None or output_price is not None:
@@ -1333,15 +1560,21 @@ def main() -> int:
     parser.add_argument("--questions", required=True, type=Path, help="JSON file containing the questions map")
     parser.add_argument("--cases", required=True, type=Path, help="JSONL file containing state and optional expected answers")
     parser.add_argument("--output", type=Path, help="Write the report JSON to this path")
-    parser.add_argument("--provider", choices=sorted(PROVIDERS), default="typesafe", help="typesafe, openjev, openjev-hf, localjev, ollama, or an OpenAI-compatible local server")
-    parser.add_argument("--model", default="jev-latest")
-    parser.add_argument("--base-url", help="Local server base URL; defaults to OpenJev :8000, OpenJev-HF/SGLang :30000, LocalJev :8080, Ollama :11434, or OpenAI-compatible :8000/v1")
+    parser.add_argument(
+        "--provider",
+        choices=sorted(PROVIDERS),
+        default="typesafe",
+        help="provider adapter; use von, litjev, or simple-jev for native /v1/systemone servers",
+    )
+    parser.add_argument("--model", help="Model identifier; defaults to the selected provider's documented local alias")
+    parser.add_argument("--base-url", help="Local server base URL; provider defaults are recorded in the report")
     parser.add_argument("--api-key-env", default="LOCAL_MODEL_API_KEY", help="Environment variable for a local provider API key")
     parser.add_argument("--max-state-bytes", type=int, help="Fail cases whose serialized state exceeds this privacy/context guardrail")
     parser.add_argument("--structured-protocol", choices=("openai", "llama.cpp"), default="openai", help="Structured-output request dialect for local OpenAI-compatible servers")
     parser.add_argument("--no-structured-output", dest="structured_output", action="store_false", help="Do not ask the local server for schema-constrained decoding")
     parser.set_defaults(structured_output=True)
     parser.add_argument("--allow-json-repair", action="store_true", help="Permit fenced/object extraction when a local model adds non-JSON text")
+    parser.add_argument("--calibration-profile", type=Path, help="Apply a profile produced by scripts/fit_calibration.py")
     parser.add_argument("--temperature", type=float, default=0.0, help="Local generation temperature; use a non-zero value for diverse ensemble samples")
     parser.add_argument("--max-output-tokens", type=int, default=1024)
     parser.add_argument("--samples", type=int, default=1, help="Number of independent answer samples to aggregate")
@@ -1378,7 +1611,8 @@ def main() -> int:
         fail("retries cannot be negative; timeout must be positive and max-backoff non-negative")
     if args.offset < 0 or args.limit is not None and args.limit < 1:
         fail("offset cannot be negative and limit must be positive")
-    if not isinstance(args.model, str) or not args.model.strip():
+    model = args.model or str(PROVIDER_SPECS[args.provider]["default_model"])
+    if not isinstance(model, str) or not model.strip():
         fail("model must be a non-empty string")
     if args.provider == "ollama":
         base_url = args.base_url or "http://127.0.0.1:11434"
@@ -1388,6 +1622,8 @@ def main() -> int:
         base_url = args.base_url or "http://127.0.0.1:8000"
     elif args.provider == "localjev":
         base_url = args.base_url or "http://127.0.0.1:8080"
+    elif args.provider in {"von", "litjev", "simple-jev"}:
+        base_url = args.base_url or str(PROVIDER_SPECS[args.provider]["default_base_url"])
     elif args.provider == "openai-compatible":
         base_url = args.base_url or "http://127.0.0.1:8000/v1"
     else:
@@ -1423,6 +1659,20 @@ def main() -> int:
     except HarnessInputError as exc:
         fail(str(exc))
 
+    calibration_profile: dict[str, Any] | None = None
+    profile_binding_warnings: list[str] = []
+    if args.calibration_profile:
+        try:
+            calibration_profile = load_profile(args.calibration_profile)
+            profile_binding_warnings = calibration_binding_warnings(
+                calibration_profile,
+                provider=args.provider,
+                model=model,
+                question_sha256=canonical_hash(questions),
+            )
+        except CalibrationError as exc:
+            fail(str(exc))
+
     selected = all_cases[args.offset:]
     if args.limit is not None:
         selected = selected[: args.limit]
@@ -1439,7 +1689,8 @@ def main() -> int:
 
     config = {
         "provider": args.provider,
-        "model": args.model,
+        "provider_capabilities": provider_capabilities(args.provider),
+        "model": model,
         "base_url": base_url or None,
         "max_state_bytes": args.max_state_bytes,
         "structured_output": args.structured_output,
@@ -1464,7 +1715,16 @@ def main() -> int:
         "score_tolerance": args.score_tolerance,
         "question_sha256": canonical_hash(questions),
         "case_id_sha256": canonical_hash([case["id"] for case in selected]),
+        "case_sha256": canonical_hash([
+            {key: case.get(key) for key in ("id", "tags", "state", "expected")}
+            for case in selected
+        ]),
         "tag_filter": args.tag or [],
+        "calibration_profile": {
+            "path_supplied": bool(args.calibration_profile),
+            "profile_id": calibration_profile.get("profile_id") if calibration_profile else None,
+            "binding_warnings": profile_binding_warnings,
+        },
     }
     if args.validate_only:
         print(json.dumps({"valid": True, "harness_version": HARNESS_VERSION, "config": config, "cases": len(selected), "questions": list(questions)}, indent=2))
@@ -1478,7 +1738,7 @@ def main() -> int:
     with ThreadPoolExecutor(max_workers=args.concurrency) as executor:
         options = {
             "provider": args.provider,
-            "model": args.model,
+            "model": model,
             "api_key": api_key,
             "base_url": base_url,
             "max_state_bytes": args.max_state_bytes,
@@ -1491,6 +1751,8 @@ def main() -> int:
             "max_output_tokens": args.max_output_tokens,
             "seed": args.seed,
             "allow_json_repair": args.allow_json_repair,
+            "calibration_profile": calibration_profile,
+            "calibration_binding_warnings": profile_binding_warnings,
             "samples": args.samples,
             "min_valid_samples": min_valid_samples,
             "noul_threshold": args.noul_threshold,
@@ -1517,7 +1779,7 @@ def main() -> int:
                     "latency_ms": 0,
                     "state_bytes": json_size(selected[index]["state"]),
                     "provider": args.provider,
-                    "model": args.model,
+                    "model": model,
                     "decision": "failed",
                     "sample_count": args.samples,
                     "valid_sample_count": 0,
@@ -1525,7 +1787,11 @@ def main() -> int:
                     "answers": {},
                     "evaluations": [],
                     "usage": {},
-                    "warnings": [],
+                    "warnings": list(profile_binding_warnings),
+                    "calibration": {
+                        "applied": calibration_profile is not None,
+                        "profile_id": calibration_profile.get("profile_id") if calibration_profile else None,
+                    },
                 }
     final_records = [record for record in records if record is not None]
     summary = summarize(final_records, questions, args.input_price_per_million, args.output_price_per_million)
