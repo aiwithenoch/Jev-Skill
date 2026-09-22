@@ -19,6 +19,42 @@ keep the final permission decision in code. See
 [references/langchain.md](references/langchain.md) and the optional
 [example](examples/langchain_jev.py).
 
+## Transcript-derived control plane
+
+The [LangChain “Building a Harness with Jev” video](https://youtu.be/VE5dsWll06M)
+shows three practical control-plane jobs: route simple work to a cheaper model,
+gate risky tool calls, and score agent traces against a rubric. The repository
+now includes dependency-free policies for the last mile in
+[`scripts/jev_control.py`](scripts/jev_control.py):
+
+```python
+from jev_control import assess_tool_call, judge_typed_answers, route_choice
+
+route = route_choice(
+    response,
+    {"fast": "cheap-model", "strong": "strong-model"},
+    question_id="complexity",
+    min_confidence=0.80,
+    min_margin=0.10,
+)
+
+gate = assess_tool_call(
+    "delete_database",
+    response,
+    question_id="tool_risk",
+    protected_tools={"delete_database"},
+    authorized=policy_authorized,
+)
+
+grade = judge_typed_answers(response, rubric)
+```
+
+Routing uses the probability distribution and runner-up margin rather than a
+self-reported confidence field. Protected tools fail closed on invalid or
+missing classifier output, and a low risk score never grants authorization.
+The rubric judge returns `accept`, `review`, or `reject`; it does not execute
+the agent or hide uncertainty.
+
 ## Built by AI With Enoch
 
 Jev Skill is created and maintained by Enoch Ansong, an AI engineer and

@@ -142,6 +142,13 @@ yes probability is the signal.
 - Verification: check a claim or extracted field against evidence and escalate
   uncertain cases.
 
+For a provider-neutral implementation of the control plane, use
+[`scripts/jev_control.py`](scripts/jev_control.py). `route_choice` requires
+both a top-probability threshold and a runner-up margin; `assess_tool_call`
+fails closed for protected tools and requires deterministic authorization;
+`judge_typed_answers` aggregates explicit rubric criteria into accept/review/
+reject. These functions do not execute tools or grant permissions.
+
 ## LangChain agent control plane
 
 For LangChain applications, use the official `langchain-typesafe` package as
@@ -183,6 +190,12 @@ calibration and selective coverage, per-question/per-tag slices, request IDs,
 latency percentiles, state size, retry attempts, token totals, optional cost
 estimates, and CI quality gates. Read
 [harness.md](references/harness.md) for the input schema and commands.
+
+The harness measures the decision layer; use the control-plane policies to
+exercise the agent layer too. Add cases for low-margin routing, invalid or
+timed-out risk calls, unlisted tools, deterministic authorization overrides,
+and partial rubric scores. A system is not safe merely because the classifier
+is accurate on a static golden set.
 
 The same typed decision contract can run against local models. This does not
 turn a smaller model into Jev or guarantee Jev-level accuracy; it gives the

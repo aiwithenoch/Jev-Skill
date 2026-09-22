@@ -125,6 +125,44 @@ and irreversible-action policy in code. The Jev gate is a learned signal, not
 an authorization grant. The stock middleware blocks; it does not open a human
 approval UI.
 
+## Provider-neutral policy adapter
+
+If you are not using the optional LangChain middleware, or want a deterministic
+boundary around it, import the dependency-free helpers from
+[`scripts/jev_control.py`](../scripts/jev_control.py):
+
+```python
+from jev_control import assess_tool_call, judge_typed_answers, route_choice
+
+route = route_choice(
+    classifier_response,
+    {"fast": "openai:gpt-4.1-mini", "strong": "openai:o3"},
+    question_id="complexity",
+    min_confidence=0.80,
+    min_margin=0.10,
+)
+
+tool_decision = assess_tool_call(
+    tool_name,
+    classifier_response,
+    question_id="risk",
+    protected_tools={"bash", "delete_record"},
+    authorized=deterministic_authorizer(tool_name, arguments),
+)
+
+grade = judge_typed_answers(classifier_response, {
+    "correct": {"type": "noul", "threshold": 0.80, "weight": 2},
+    "grounded": {"type": "noul", "threshold": 0.80},
+    "cited": {"type": "noul", "threshold": 0.80},
+})
+```
+
+The route helper recomputes confidence from the distribution and requires a
+margin over the runner-up. The tool helper blocks protected tools when the
+classifier fails or returns malformed output, and returns `review` when the
+caller has not supplied deterministic authorization. The judge helper is an
+online-eval decision, not a replacement for sampled human review.
+
 ## Local-provider boundary
 
 `langchain-typesafe` calls the hosted TypeSafe API. It does not automatically

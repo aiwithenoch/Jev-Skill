@@ -10,7 +10,9 @@ and llama.cpp server.
 It also supports native `/v1/systemone` adapters for Von, LitJev, and
 Simple-JEV, plus dependency-free calibration fitting and matched-report
 comparison. It documents the optional official LangChain integration for using Jev as
-an agent routing and pre-tool decision layer.
+an agent routing and pre-tool decision layer, and includes provider-neutral
+control-plane policies for routing, fail-closed tool-risk assessment, and
+rubric judging.
 The included harness validates Noul, Choice, and Score answers; can aggregate
 independent samples; can run a typed verifier; and marks uncertain cases for
 review instead of silently forcing a decision.
@@ -24,6 +26,8 @@ review instead of silently forcing a decision.
   and optional cost.
 - Building a safe local-model decision layer with schema-constrained output
   and explicit abstention.
+- Adding Jev decisions to an agent control plane without granting model output
+  authority over permissions or side effects.
 
 ## Not For
 
@@ -32,6 +36,8 @@ review instead of silently forcing a decision.
 - Replacing deterministic arithmetic, date handling, permissions, or policy
   enforcement with model output.
 - Treating confidence, consensus, or a verifier score as proof of truth.
+- Executing a tool directly from a Jev answer without deterministic policy and
+  authorization checks.
 
 ## Safety Notes
 

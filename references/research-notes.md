@@ -5,6 +5,27 @@ Research date: 2026-09-22.
 These notes distill the current official TypeSafe documentation into routing
 guidance. The live pages remain authoritative.
 
+## Video-derived control-plane notes
+
+Transcript source: [LangChain — Building a Harness with Jev](https://youtu.be/VE5dsWll06M)
+(9:14, captions retrieved 2026-09-22). The speaker presents Jev as a fast,
+typed decision layer around a slower open-ended agent and demonstrates three
+control-plane uses: model routing by task complexity, pre-tool risk gating,
+and online rubric judging of agent answers for correctness, grounding, and
+citation.
+
+The video’s speed, cost, and reliability comparisons are claims from the
+presentation, not benchmarks produced by this repository. We used the
+architecture pattern, not those claims, to add
+[`scripts/jev_control.py`](../scripts/jev_control.py):
+
+- route only when the Choice distribution clears both a confidence and a
+  runner-up-margin threshold;
+- fail closed for malformed or unavailable risk judgments, while keeping
+  authorization deterministic and outside the model;
+- aggregate explicit typed rubric criteria into `accept`, `review`, or
+  `reject` so online evaluation can abstain instead of forcing a grade.
+
 ## Official source map
 
 - Documentation index: <https://docs.typesafe.ai/llms.txt>
@@ -44,6 +65,7 @@ guidance. The live pages remain authoritative.
 - JevBench benchmark repository: <https://github.com/fstandhartinger/jevbench>
 - OpenLayer jevals agent evaluation/guardrails: <https://github.com/openlayer-ai/jevals>
 - LangChain Jev harness article: <https://www.langchain.com/blog/building-a-harness-with-jev>
+- LangChain Jev harness video: <https://youtu.be/VE5dsWll06M>
 - LangChain TypeSafe integration package: <https://pypi.org/project/langchain-typesafe/>
 - Jev-class model comparison and JevBench protocol: <https://benchmarkheaven.com/jev-models>
 - vLLM structured outputs: <https://docs.vllm.ai/en/latest/features/structured_outputs/>
