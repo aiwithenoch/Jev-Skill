@@ -118,6 +118,28 @@ The upstream zero-shot scorer also documents its probabilities as approximate,
 so calibrate thresholds on your own labeled cases rather than treating a high
 local probability as proof.
 
+Run the open-weight [AlexWortega/openjev](https://huggingface.co/AlexWortega/openjev)
+checkpoint through its published SGLang `/classify` server:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider openjev-hf \
+  --base-url http://127.0.0.1:30000 \
+  --model qwen3.5-0.8b-nli-v2s-long \
+  --concurrency 1 \
+  --questions questions.json --cases cases.jsonl \
+  --output openjev-hf-report.json
+```
+
+The server returns raw three-class NLI logits in each `embedding` field. The
+harness applies softmax, uses entailment scores to rerank Choice/Score options,
+and maps a Noul to `entailment + 0.5 * neutral`. It warns on every request so
+reports cannot silently present these derived values as direct Jev
+probabilities. The model card publishes 0.8B, 4B, and 35B-A3B variants and an
+MIT license; download and hardware setup remain the operator's responsibility.
+Use the same golden set and keep this provider's calibration slices separate
+from native OpenJev and hosted TypeSafe results.
+
 Run against [LocalJev](https://github.com/githubnext/localjev), the MIT-licensed
 Bun bridge for OpenAI-compatible DiffusionGemma servers:
 

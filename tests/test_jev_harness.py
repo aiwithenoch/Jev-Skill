@@ -165,6 +165,36 @@ class OpenJevHandler(BaseHTTPRequestHandler):
         return
 
 
+class OpenJevHFHandler(BaseHTTPRequestHandler):
+    path_seen = None
+    body_seen = None
+
+    def do_POST(self):  # noqa: N802 - stdlib handler API
+        self.__class__.path_seen = self.path
+        length = int(self.headers.get("Content-Length", "0"))
+        self.__class__.body_seen = json.loads(self.rfile.read(length))
+        embeddings = []
+        for text in self.__class__.body_seen["text"]:
+            if "urgent" in text:
+                embeddings.append([0.0, 4.0, 0.0])
+            elif "billing" in text:
+                embeddings.append([0.0, 4.0, 0.0])
+            elif "Material" in text:
+                embeddings.append([0.0, 4.0, 0.0])
+            else:
+                embeddings.append([4.0, 0.0, 0.0])
+        encoded = json.dumps([{"embedding": embedding} for embedding in embeddings]).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("x-request-id", "hf-test-1")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, *_args):
+        return
+
+
 class HarnessTests(unittest.TestCase):
     def test_strict_json_and_aggregation(self):
         with self.assertRaises(ValueError):
@@ -292,6 +322,34 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue(record["ok"], record)
         self.assertEqual(record["provider"], "localjev")
         self.assertEqual(OpenJevHandler.path_seen, "/v1/systemone")
+
+    def test_openjev_hf_sglang_nli_adapter(self):
+        OpenJevHFHandler.path_seen = None
+        OpenJevHFHandler.body_seen = None
+        server = ThreadingHTTPServer(("127.0.0.1", 0), OpenJevHFHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            record = harness.run_case(
+                copy.deepcopy(CASE),
+                QUESTIONS,
+                options(
+                    f"http://127.0.0.1:{server.server_port}",
+                    provider="openjev-hf",
+                    verify=False,
+                    samples=1,
+                ),
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertTrue(record["ok"], record)
+        self.assertEqual(record["provider"], "openjev-hf")
+        self.assertEqual(record["model"], "fake-local")
+        self.assertEqual(OpenJevHFHandler.path_seen, "/classify")
+        self.assertGreater(len(OpenJevHFHandler.body_seen["text"]), 1)
+        self.assertTrue(any("maps three-way NLI" in warning for warning in record["warnings"]))
+        self.assertEqual(record["answers"]["team"]["choice"], "billing")
+        self.assertEqual(record["answers"]["severity"]["legend"]["1"], "Material")
 
 
 if __name__ == "__main__":

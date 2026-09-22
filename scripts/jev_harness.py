@@ -27,10 +27,10 @@ from pathlib import Path
 from typing import Any
 
 
-HARNESS_VERSION = "2.5.0"
+HARNESS_VERSION = "2.6.0"
 API_URL = "https://api.typesafe.ai/v1/systemone"
 QUESTION_TYPES = {"noul", "choice", "score"}
-PROVIDERS = {"typesafe", "openai-compatible", "ollama", "openjev", "localjev"}
+PROVIDERS = {"typesafe", "openai-compatible", "ollama", "openjev", "openjev-hf", "localjev"}
 NATIVE_JEV_PROVIDERS = {"openjev", "localjev"}
 TRANSIENT_HTTP_CODES = {408, 429, 500, 502, 503, 504, 529}
 REQUEST_ID_HEADERS = ("x-typesafe-request-id", "x-request-id", "request-id")
@@ -332,6 +332,8 @@ def local_endpoint(provider: str, base_url: str) -> str:
     base = base_url.rstrip("/")
     if provider == "ollama":
         return base if base.endswith("/api/chat") else f"{base}/chat" if base.endswith("/api") else f"{base}/api/chat"
+    if provider == "openjev-hf":
+        return base if base.endswith("/classify") else f"{base}/classify"
     if provider in NATIVE_JEV_PROVIDERS:
         return base if base.endswith("/v1/systemone") else f"{base}/systemone" if base.endswith("/v1") else f"{base}/v1/systemone"
     return base if base.endswith("/chat/completions") else f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
@@ -451,6 +453,153 @@ def request_native_jev(
     return envelope, request_id, attempts, []
 
 
+def openjev_hf_text(value: Any) -> str:
+    """Render structured harness data as stable text for an NLI cross-encoder."""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def openjev_hf_pairs(payload: dict[str, Any]) -> tuple[list[str], list[tuple[str, str, list[str] | None, Any]]]:
+    """Build SGLang text inputs and enough metadata to restore typed answers.
+
+    The Hugging Face OpenJev checkpoint is an NLI model, not a System One
+    server. Choice and Score hypotheses follow the model card's reranking
+    pattern; Noul uses entailment/contradiction/neutral evidence for a binary
+    probability mapping.
+    """
+    state = openjev_hf_text(payload["state"])
+    texts: list[str] = []
+    specs: list[tuple[str, str, list[str] | None, Any]] = []
+    for question_id, question in payload["questions"].items():
+        instructions = openjev_hf_text(question["instructions"])
+        question_type = question["type"]
+        if question_type == "noul":
+            premise = f"Evidence:\n{state}"
+            hypothesis = f"The condition described by this question is true: {instructions}"
+            texts.append(f"Premise: {premise}\nHypothesis: {hypothesis}")
+            specs.append((question_id, question_type, None, None))
+            continue
+
+        premise = f"Evidence:\n{state}\nQuestion: {instructions}"
+        if question_type == "choice":
+            keys = list(question["criteria"])
+            options = [
+                f"{key} — {openjev_hf_text(question['criteria'][key])}"
+                if question["criteria"][key] is not None
+                else key
+                for key in keys
+            ]
+        else:
+            keys = [str(index) for index in range(len(question["criteria"]))]
+            options = [openjev_hf_text(value) for value in question["criteria"]]
+        for option in options:
+            texts.append(f"Premise: {premise}\nHypothesis: The correct answer is: {option}")
+        specs.append((question_id, question_type, keys, question.get("criteria")))
+    return texts, specs
+
+
+def softmax(values: list[float]) -> list[float]:
+    maximum = max(values)
+    exponentials = [math.exp(value - maximum) for value in values]
+    total = sum(exponentials)
+    if not math.isfinite(total) or total <= 0:
+        raise ValueError("OpenJev-HF returned invalid logits")
+    return [value / total for value in exponentials]
+
+
+def request_openjev_hf(
+    payload: dict[str, Any],
+    model: str,
+    base_url: str,
+    api_key: str | None,
+    timeout: float,
+    retries: int,
+    max_backoff: float,
+) -> tuple[dict[str, Any], str | None, int, list[str]]:
+    """Call the Hugging Face OpenJev checkpoint through SGLang /classify.
+
+    SGLang returns raw three-class logits in an ``embedding`` field. This
+    adapter deliberately keeps the NLI-derived probabilities distinct from
+    direct OpenJev/TypeSafe probabilities and warns that calibration is needed.
+    """
+    texts, specs = openjev_hf_pairs(payload)
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": f"jev-skill-harness/{HARNESS_VERSION}",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    envelope, request_id, attempts = request_json(
+        local_endpoint("openjev-hf", base_url),
+        {"text": texts},
+        headers,
+        timeout,
+        retries,
+        max_backoff,
+        "OpenJev-HF",
+    )
+    items = envelope if isinstance(envelope, list) else [envelope]
+    if len(items) != len(texts):
+        raise RuntimeError(f"OpenJev-HF returned {len(items)} logits for {len(texts)} hypotheses")
+    probabilities: list[list[float]] = []
+    for index, item in enumerate(items):
+        logits = item.get("embedding") if isinstance(item, dict) else None
+        if logits is None and isinstance(item, dict):
+            logits = item.get("logits")
+        if not isinstance(logits, list) or len(logits) != 3:
+            raise RuntimeError(f"OpenJev-HF item {index + 1} must contain three logits in embedding")
+        numeric_logits = [require_finite_number(value, f"OpenJev-HF logit {index + 1}") for value in logits]
+        probabilities.append(softmax(numeric_logits))
+
+    answers: dict[str, Any] = {}
+    offset = 0
+    for question_id, question_type, keys, criteria in specs:
+        if question_type == "noul":
+            _contradiction, entailment, neutral = probabilities[offset]
+            # Neutral means unresolved. Splitting it evenly preserves a
+            # bounded binary probability while making the ambiguity visible in
+            # the warning below rather than silently calling neutral false.
+            answers[question_id] = {
+                "type": "noul",
+                "noul": entailment + (0.5 * neutral),
+            }
+            offset += 1
+            continue
+        assert keys is not None
+        option_probabilities = [probabilities[offset + index][1] for index in range(len(keys))]
+        total = sum(option_probabilities)
+        if not math.isfinite(total) or total <= EPSILON:
+            normalized = [1.0 / len(keys)] * len(keys)
+        else:
+            normalized = [value / total for value in option_probabilities]
+        distribution = {key: normalized[index] for index, key in enumerate(keys)}
+        selected = max(range(len(keys)), key=lambda index: (normalized[index], -index))
+        if question_type == "choice":
+            answers[question_id] = {
+                "type": "choice",
+                "choice": keys[selected],
+                "probabilities": distribution,
+                "confidence": max(normalized),
+            }
+        else:
+            answers[question_id] = {
+                "type": "score",
+                "score": sum(index * normalized[index] for index in range(len(keys))),
+                "legend": {key: criteria[int(key)] for key in keys},
+                "probabilities": distribution,
+                "confidence": max(normalized),
+            }
+        offset += len(keys)
+    return {
+        "model": model,
+        "answers": answers,
+    }, request_id, attempts, [
+        "OpenJev-HF maps three-way NLI logits to typed answers; calibrate this provider separately from direct Jev probabilities",
+    ]
+
+
 def request_local(payload: dict[str, Any], provider: str, model: str, base_url: str, api_key: str | None, timeout: float, retries: int, max_backoff: float, structured_output: bool, structured_protocol: str, temperature: float, max_output_tokens: int, seed: int | None, allow_json_repair: bool) -> tuple[dict[str, Any], str | None, int, list[str]]:
     questions = payload["questions"]
     schema = response_json_schema(questions)
@@ -507,6 +656,8 @@ def invoke_provider(payload: dict[str, Any], provider: str, model: str, api_key:
             raise RuntimeError("set TYPESAFE_API_KEY for the TypeSafe provider")
         response, request_id, attempts = request(payload, api_key, timeout, retries, max_backoff)
         return response, request_id, attempts, []
+    if provider == "openjev-hf":
+        return request_openjev_hf(payload, model, base_url, api_key, timeout, retries, max_backoff)
     if provider in NATIVE_JEV_PROVIDERS:
         return request_native_jev(payload, provider, model, base_url, api_key, timeout, retries, max_backoff)
     return request_local(payload, provider, model, base_url, api_key, timeout, retries, max_backoff, structured_output, structured_protocol, temperature, max_output_tokens, seed, allow_json_repair)
@@ -1182,9 +1333,9 @@ def main() -> int:
     parser.add_argument("--questions", required=True, type=Path, help="JSON file containing the questions map")
     parser.add_argument("--cases", required=True, type=Path, help="JSONL file containing state and optional expected answers")
     parser.add_argument("--output", type=Path, help="Write the report JSON to this path")
-    parser.add_argument("--provider", choices=sorted(PROVIDERS), default="typesafe", help="typesafe, openjev, localjev, ollama, or an OpenAI-compatible local server")
+    parser.add_argument("--provider", choices=sorted(PROVIDERS), default="typesafe", help="typesafe, openjev, openjev-hf, localjev, ollama, or an OpenAI-compatible local server")
     parser.add_argument("--model", default="jev-latest")
-    parser.add_argument("--base-url", help="Local server base URL; defaults to OpenJev :8000, LocalJev :8080, Ollama :11434, or OpenAI-compatible :8000/v1")
+    parser.add_argument("--base-url", help="Local server base URL; defaults to OpenJev :8000, OpenJev-HF/SGLang :30000, LocalJev :8080, Ollama :11434, or OpenAI-compatible :8000/v1")
     parser.add_argument("--api-key-env", default="LOCAL_MODEL_API_KEY", help="Environment variable for a local provider API key")
     parser.add_argument("--max-state-bytes", type=int, help="Fail cases whose serialized state exceeds this privacy/context guardrail")
     parser.add_argument("--structured-protocol", choices=("openai", "llama.cpp"), default="openai", help="Structured-output request dialect for local OpenAI-compatible servers")
@@ -1231,6 +1382,8 @@ def main() -> int:
         fail("model must be a non-empty string")
     if args.provider == "ollama":
         base_url = args.base_url or "http://127.0.0.1:11434"
+    elif args.provider == "openjev-hf":
+        base_url = args.base_url or "http://127.0.0.1:30000"
     elif args.provider == "openjev":
         base_url = args.base_url or "http://127.0.0.1:8000"
     elif args.provider == "localjev":

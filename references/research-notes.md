@@ -33,6 +33,7 @@ guidance. The live pages remain authoritative.
 - Official JavaScript SDK: <https://github.com/typesafe-ai/typesafe-sdk-js>
 - Official System One adapter: <https://github.com/typesafe-ai/system-one-adapter-python>
 - Community OpenJev local scorer: <https://github.com/daseinlabs/open-jev>
+- OpenJev open-weight NLI model card and SGLang server: <https://huggingface.co/AlexWortega/openjev>
 - Community LocalJev Bun bridge: <https://github.com/githubnext/localjev>
 - Jev-class model comparison and JevBench protocol: <https://benchmarkheaven.com/jev-models>
 - vLLM structured outputs: <https://docs.vllm.ai/en/latest/features/structured_outputs/>
@@ -205,6 +206,27 @@ also exposes a lower-level `/score` route. Its documented implementation uses
 MLX and a local Gemma checkpoint on Apple Silicon. The Jev Skill harness calls
 the typed route directly through `--provider openjev`, preserving the same
 question files and report schema used for hosted Jev and other local runtimes.
+
+The `AlexWortega/openjev` Hugging Face repository is a separate open-weight
+implementation, not an alternate URL for the daseinlabs server. Its model card
+describes Qwen3.5 cross-encoder checkpoints trained as three-way NLI models,
+with labels ordered contradiction, entailment, and neutral. The published
+`modeling_openjev.py` exposes direct Transformers inference and optimized
+shared-prefix hypothesis scoring; its `code/` directory also supplies an
+SGLang external model package and client. The SGLang client posts text batches
+to `/classify` and reads raw logits from each `embedding` field. The model card
+lists a 0.8B long-context variant, a recommended 4B v2 text+image variant, and
+a 35B-A3B MoE variant, plus an MIT license.
+
+Jev Skill's `openjev-hf` adapter targets that SGLang route without copying the
+model files. It sends the state as the NLI premise and turns each Choice/Score
+criterion into a hypothesis using the card's `The correct answer is: ...`
+pattern. It converts NLI logits with softmax, normalizes entailment scores over
+options, and maps a Noul to entailment plus half of neutral mass. This makes
+the checkpoint measurable under the shared harness contract, but those derived
+probabilities are not direct Jev probabilities and require independent
+calibration. The current adapter serializes text/JSON state; image-capable
+inference remains a future extension.
 
 This is compatibility, not weight parity. Benchmark Heaven's JevBench page
 lists several independent Jev-class rebuilds, including OpenJev, SemIf, and

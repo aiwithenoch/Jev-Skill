@@ -50,6 +50,8 @@ included harness lets the same Noul/Choice/Score question set run against:
 - TypeSafe Jev (`POST /v1/systemone`)
 - OpenJev's local TypeSafe-compatible server (`POST /v1/systemone`) backed by
   one-pass option scoring on Apple Silicon/MLX
+- AlexWortega's openjev Hugging Face checkpoint through its SGLang
+  `/classify` endpoint, with NLI logits adapted to typed decisions
 - LocalJev's TypeScript/Bun bridge (`POST /v1/systemone`) backed by an
   OpenAI-compatible DiffusionGemma endpoint
 - Ollama native structured outputs (`POST /api/chat`)
@@ -139,6 +141,41 @@ sampling diversity.
 OpenJev's default zero-shot log-probability scores are not automatically
 calibrated; use a labeled golden set and the harness calibration metrics before
 using thresholds in production.
+
+For the open-weight [AlexWortega/openjev](https://huggingface.co/AlexWortega/openjev)
+checkpoint, use the SGLang serving files published with the model card. The
+small v2s checkpoint is a practical starting point; the 4B and 35B variants
+need more hardware. This path requires an SGLang-compatible environment and
+does not download weights into this repository:
+
+```bash
+hf download AlexWortega/openjev \
+  --include "qwen3.5-0.8b-nli-v2s-long/*" "code/*" \
+  --local-dir openjev_hf
+cd openjev_hf/code
+bash serve_sglang.sh ../qwen3.5-0.8b-nli-v2s-long 30000
+```
+
+Then run the harness against the raw SGLang classifier:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider openjev-hf \
+  --base-url http://127.0.0.1:30000 \
+  --model qwen3.5-0.8b-nli-v2s-long \
+  --concurrency 1 \
+  --questions questions.json \
+  --cases cases.jsonl \
+  --output openjev-hf-report.json
+```
+
+This provider sends NLI premise/hypothesis pairs to `/classify`, converts
+`contradiction / entailment / neutral` logits into Noul, Choice, and Score
+answers, and emits a calibration warning. Those derived probabilities are not
+the same as direct OpenJev or hosted Jev probabilities; benchmark them on a
+labeled set before using thresholds. The checkpoint is MIT-licensed on its
+model card; review upstream terms and hardware requirements before
+redistributing weights.
 
 For a portable DiffusionGemma bridge, run
 [LocalJev](https://github.com/githubnext/localjev) on port `8080` after
@@ -252,7 +289,8 @@ contract and reliability harness using the model you run.
 
 ### Does it make a local model as intelligent as Jev?
 
-No. It cannot change model weights. It makes local-model decisions more
+No. It cannot change model weights. It can run the openjev checkpoint directly
+or wrap another local model, then make the resulting decisions more
 structured, testable, measurable, and safer to deploy.
 
 ### Can Codex or Claude Code use it?

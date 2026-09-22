@@ -193,6 +193,30 @@ its local scorer and model behavior must be benchmarked separately from
 TypeSafe's hosted Jev. Keep the upstream repository's licensing and model
 distribution terms in view before redistributing its code or weights.
 
+The [AlexWortega/openjev](https://huggingface.co/AlexWortega/openjev) model
+card is a separate open-weight implementation: a Qwen3.5 cross-encoder trained
+for three-way NLI (`contradiction`, `entailment`, `neutral`). Its published
+SGLang launcher exposes raw logits at `/classify`, not the native System One
+route. Use the first-class `openjev-hf` provider to benchmark it:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider openjev-hf \
+  --base-url http://127.0.0.1:30000 \
+  --model qwen3.5-0.8b-nli-v2s-long \
+  --concurrency 1 \
+  --questions questions.json --cases cases.jsonl \
+  --output openjev-hf-report.json
+```
+
+The adapter uses the model-card reranking format for Choice and Score. For a
+Noul it maps entailment plus half of neutral mass to the binary yes
+probability. This is an explicit interoperability mapping, not a claim that
+the resulting probability is a calibrated Jev probability; keep calibration,
+review gates, and the model's MIT license separate from the native OpenJev
+provider. The model card also documents image inputs, but this harness path
+currently serializes text/JSON state only.
+
 LocalJev is another local provider: a MIT-licensed TypeScript/Bun bridge that
 exposes the same `/v1/systemone` contract over an OpenAI-compatible
 DiffusionGemma server. Use `--provider localjev` with its default port `8080`.
