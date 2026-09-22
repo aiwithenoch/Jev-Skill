@@ -33,6 +33,7 @@ guidance. The live pages remain authoritative.
 - Official JavaScript SDK: <https://github.com/typesafe-ai/typesafe-sdk-js>
 - Official System One adapter: <https://github.com/typesafe-ai/system-one-adapter-python>
 - Community OpenJev local scorer: <https://github.com/daseinlabs/open-jev>
+- Community LocalJev Bun bridge: <https://github.com/githubnext/localjev>
 - Jev-class model comparison and JevBench protocol: <https://benchmarkheaven.com/jev-models>
 - vLLM structured outputs: <https://docs.vllm.ai/en/latest/features/structured_outputs/>
 - Ollama structured outputs: <https://github.com/ollama/ollama/blob/main/docs/capabilities/structured-outputs.mdx>
@@ -211,6 +212,19 @@ open-alternative-jev, while identifying TypeSafe's Jev as closed. Treat each
 rebuild as a separate model with its own calibration, license, model-card, and
 distribution checks. Do not copy upstream source or redistribute checkpoints
 without confirming the upstream repository and model licenses.
+
+`githubnext/localjev` is a complementary MIT-licensed TypeScript/Bun bridge.
+It exposes the same `/v1/systemone` contract on port `8080`, translates typed
+questions into a classification prompt, asks an OpenAI-compatible
+DiffusionGemma endpoint for scalar/vector probabilities, normalizes them, and
+calculates Jev-compatible answers. It adds useful operational patterns—an
+in-flight semaphore, bounded queue with `529` overload responses, malformed
+JSON retries, question/outcome chunking, and repeatable model bake-offs.
+
+The bridge is portable, but its probabilities are generated/self-reported by
+the model and therefore are not mathematically equivalent to OpenJev's direct
+logit read. The harness exposes it as `--provider localjev` so its calibration,
+latency, retries, and review rate remain visible as a separate model path.
 
 Structured decoding is a syntax guarantee, not a semantic truth guarantee.
 The strongest practical stack implemented here is:

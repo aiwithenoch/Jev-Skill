@@ -50,6 +50,8 @@ included harness lets the same Noul/Choice/Score question set run against:
 - TypeSafe Jev (`POST /v1/systemone`)
 - OpenJev's local TypeSafe-compatible server (`POST /v1/systemone`) backed by
   one-pass option scoring on Apple Silicon/MLX
+- LocalJev's TypeScript/Bun bridge (`POST /v1/systemone`) backed by an
+  OpenAI-compatible DiffusionGemma endpoint
 - Ollama native structured outputs (`POST /api/chat`)
 - OpenAI-compatible local servers such as vLLM, LM Studio, and llama.cpp
 
@@ -138,6 +140,36 @@ OpenJev's default zero-shot log-probability scores are not automatically
 calibrated; use a labeled golden set and the harness calibration metrics before
 using thresholds in production.
 
+For a portable DiffusionGemma bridge, run
+[LocalJev](https://github.com/githubnext/localjev) on port `8080` after
+connecting it to your local OpenAI-compatible inference server:
+
+```bash
+git clone https://github.com/githubnext/localjev.git
+cd localjev
+bun install
+cp .env.example .env
+# Configure LOCALJEV_UPSTREAM, LOCALJEV_UPSTREAM_MODEL, and its key if needed.
+bun run start
+```
+
+Then evaluate it with the same golden set:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider localjev \
+  --base-url http://127.0.0.1:8080 \
+  --model localjev-latest \
+  --concurrency 2 \
+  --questions questions.json \
+  --cases cases.jsonl \
+  --output localjev-report.json
+```
+
+LocalJev is wire-compatible but its probabilities are generated and
+self-reported by the upstream model; they are not equivalent to reading
+OpenJev logits. Treat its calibration as a separate benchmark result.
+
 Use `--structured-protocol llama.cpp` for llama.cpp's direct schema request
 shape. Structured output is strict by default; `--allow-json-repair` is an
 explicit diagnostic escape hatch and should remain off in CI.
@@ -214,7 +246,7 @@ golden sets kept out of version control.
 
 ### Does Jev Skill require the Jev API?
 
-No. It can run against OpenJev, Ollama, vLLM, LM Studio, or llama.cpp server.
+No. It can run against OpenJev, LocalJev, Ollama, vLLM, LM Studio, or llama.cpp server.
 The Jev API gives you Jev's model; local providers give you the same typed
 contract and reliability harness using the model you run.
 

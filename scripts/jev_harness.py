@@ -27,10 +27,11 @@ from pathlib import Path
 from typing import Any
 
 
-HARNESS_VERSION = "2.4.0"
+HARNESS_VERSION = "2.5.0"
 API_URL = "https://api.typesafe.ai/v1/systemone"
 QUESTION_TYPES = {"noul", "choice", "score"}
-PROVIDERS = {"typesafe", "openai-compatible", "ollama", "openjev"}
+PROVIDERS = {"typesafe", "openai-compatible", "ollama", "openjev", "localjev"}
+NATIVE_JEV_PROVIDERS = {"openjev", "localjev"}
 TRANSIENT_HTTP_CODES = {408, 429, 500, 502, 503, 504, 529}
 REQUEST_ID_HEADERS = ("x-typesafe-request-id", "x-request-id", "request-id")
 CALIBRATION_THRESHOLDS = (0.5, 0.6, 0.7, 0.8, 0.9)
@@ -331,7 +332,7 @@ def local_endpoint(provider: str, base_url: str) -> str:
     base = base_url.rstrip("/")
     if provider == "ollama":
         return base if base.endswith("/api/chat") else f"{base}/chat" if base.endswith("/api") else f"{base}/api/chat"
-    if provider == "openjev":
+    if provider in NATIVE_JEV_PROVIDERS:
         return base if base.endswith("/v1/systemone") else f"{base}/systemone" if base.endswith("/v1") else f"{base}/v1/systemone"
     return base if base.endswith("/chat/completions") else f"{base}/chat/completions" if base.endswith("/v1") else f"{base}/v1/chat/completions"
 
@@ -413,8 +414,9 @@ def local_usage(envelope: dict[str, Any], provider: str) -> dict[str, int | floa
     return result
 
 
-def request_openjev(
+def request_native_jev(
     payload: dict[str, Any],
+    provider: str,
     model: str,
     base_url: str,
     api_key: str | None,
@@ -422,10 +424,11 @@ def request_openjev(
     retries: int,
     max_backoff: float,
 ) -> tuple[dict[str, Any], str | None, int, list[str]]:
-    """Call a local OpenJev server's native TypeSafe-compatible endpoint.
+    """Call a local Jev-compatible server's native typed endpoint.
 
-    OpenJev performs option scoring locally and returns typed answers directly,
-    so it does not need the chat-completion prompt or JSON-schema decoding path.
+    OpenJev performs option scoring locally. LocalJev is a TypeScript/Bun bridge
+    that asks an OpenAI-compatible model for probability JSON. Both return typed
+    answers directly, so neither needs the harness chat-completion prompt path.
     """
     headers = {
         "Accept": "application/json",
@@ -435,16 +438,16 @@ def request_openjev(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     envelope, request_id, attempts = request_json(
-        local_endpoint("openjev", base_url),
+        local_endpoint(provider, base_url),
         {**payload, "model": model},
         headers,
         timeout,
         retries,
         max_backoff,
-        "OpenJev",
+        "LocalJev" if provider == "localjev" else "OpenJev",
     )
     if not isinstance(envelope, dict):
-        raise RuntimeError("openjev returned a non-object response")
+        raise RuntimeError(f"{provider} returned a non-object response")
     return envelope, request_id, attempts, []
 
 
@@ -504,8 +507,8 @@ def invoke_provider(payload: dict[str, Any], provider: str, model: str, api_key:
             raise RuntimeError("set TYPESAFE_API_KEY for the TypeSafe provider")
         response, request_id, attempts = request(payload, api_key, timeout, retries, max_backoff)
         return response, request_id, attempts, []
-    if provider == "openjev":
-        return request_openjev(payload, model, base_url, api_key, timeout, retries, max_backoff)
+    if provider in NATIVE_JEV_PROVIDERS:
+        return request_native_jev(payload, provider, model, base_url, api_key, timeout, retries, max_backoff)
     return request_local(payload, provider, model, base_url, api_key, timeout, retries, max_backoff, structured_output, structured_protocol, temperature, max_output_tokens, seed, allow_json_repair)
 
 
@@ -1179,9 +1182,9 @@ def main() -> int:
     parser.add_argument("--questions", required=True, type=Path, help="JSON file containing the questions map")
     parser.add_argument("--cases", required=True, type=Path, help="JSONL file containing state and optional expected answers")
     parser.add_argument("--output", type=Path, help="Write the report JSON to this path")
-    parser.add_argument("--provider", choices=sorted(PROVIDERS), default="typesafe", help="typesafe, openjev, ollama, or an OpenAI-compatible local server")
+    parser.add_argument("--provider", choices=sorted(PROVIDERS), default="typesafe", help="typesafe, openjev, localjev, ollama, or an OpenAI-compatible local server")
     parser.add_argument("--model", default="jev-latest")
-    parser.add_argument("--base-url", help="Local server base URL; defaults to OpenJev :8000, Ollama :11434, or OpenAI-compatible :8000/v1")
+    parser.add_argument("--base-url", help="Local server base URL; defaults to OpenJev :8000, LocalJev :8080, Ollama :11434, or OpenAI-compatible :8000/v1")
     parser.add_argument("--api-key-env", default="LOCAL_MODEL_API_KEY", help="Environment variable for a local provider API key")
     parser.add_argument("--max-state-bytes", type=int, help="Fail cases whose serialized state exceeds this privacy/context guardrail")
     parser.add_argument("--structured-protocol", choices=("openai", "llama.cpp"), default="openai", help="Structured-output request dialect for local OpenAI-compatible servers")
@@ -1230,6 +1233,8 @@ def main() -> int:
         base_url = args.base_url or "http://127.0.0.1:11434"
     elif args.provider == "openjev":
         base_url = args.base_url or "http://127.0.0.1:8000"
+    elif args.provider == "localjev":
+        base_url = args.base_url or "http://127.0.0.1:8080"
     elif args.provider == "openai-compatible":
         base_url = args.base_url or "http://127.0.0.1:8000/v1"
     else:

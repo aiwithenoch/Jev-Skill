@@ -1,8 +1,8 @@
 # Jev evaluation harness
 
 `scripts/jev_harness.py` is a small, dependency-free runner for Jev golden
-sets. It validates typed question definitions, calls TypeSafe, OpenJev, or a
-local Ollama/OpenAI-compatible endpoint concurrently, and reports accuracy,
+sets. It validates typed question definitions, calls TypeSafe, OpenJev,
+LocalJev, or a local Ollama/OpenAI-compatible endpoint concurrently, and reports accuracy,
 calibration, reliability, latency, and token usage. It does not print state or
 API keys.
 
@@ -117,6 +117,25 @@ when measuring endpoint stability.
 The upstream zero-shot scorer also documents its probabilities as approximate,
 so calibrate thresholds on your own labeled cases rather than treating a high
 local probability as proof.
+
+Run against [LocalJev](https://github.com/githubnext/localjev), the MIT-licensed
+Bun bridge for OpenAI-compatible DiffusionGemma servers:
+
+```bash
+python3 scripts/jev_harness.py \
+  --provider localjev \
+  --base-url http://127.0.0.1:8080 \
+  --model localjev-latest \
+  --concurrency 2 \
+  --questions questions.json --cases cases.jsonl \
+  --output localjev-report.json
+```
+
+LocalJev returns the native typed wire shape, but its probabilities come from
+the upstream model's prompted JSON distribution rather than direct option
+logits. Keep it as a separate provider in comparisons and calibrate it on the
+same labeled cases. Its own queue and in-flight limits should be respected;
+start with `--concurrency 1` or `2`.
 
 For llama.cpp's direct JSON-schema request shape, add
 `--structured-protocol llama.cpp`. Local API keys are optional; if a server

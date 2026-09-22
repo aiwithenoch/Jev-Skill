@@ -270,6 +270,29 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(set(OpenJevHandler.body_seen), {"state", "model", "questions"})
         self.assertNotIn("messages", OpenJevHandler.body_seen)
 
+    def test_localjev_native_typed_endpoint_alias(self):
+        OpenJevHandler.path_seen = None
+        OpenJevHandler.body_seen = None
+        server = ThreadingHTTPServer(("127.0.0.1", 0), OpenJevHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            record = harness.run_case(
+                copy.deepcopy(CASE),
+                QUESTIONS,
+                options(
+                    f"http://127.0.0.1:{server.server_port}",
+                    provider="localjev",
+                    verify=False,
+                    samples=1,
+                ),
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertTrue(record["ok"], record)
+        self.assertEqual(record["provider"], "localjev")
+        self.assertEqual(OpenJevHandler.path_seen, "/v1/systemone")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,6 +17,9 @@ keywords:
   - large language models
   - local llm
   - OpenJev
+  - LocalJev
+  - DiffusionGemma
+  - Bun
   - JevBench
   - MLX
   - calibrated decisions

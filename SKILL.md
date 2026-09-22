@@ -193,6 +193,14 @@ its local scorer and model behavior must be benchmarked separately from
 TypeSafe's hosted Jev. Keep the upstream repository's licensing and model
 distribution terms in view before redistributing its code or weights.
 
+LocalJev is another local provider: a MIT-licensed TypeScript/Bun bridge that
+exposes the same `/v1/systemone` contract over an OpenAI-compatible
+DiffusionGemma server. Use `--provider localjev` with its default port `8080`.
+It is useful when the inference backend exposes ordinary Chat Completions but
+not OpenJev's direct logit-reading extensions. Its probabilities are prompted
+and self-reported, so compare its calibration separately and keep review gates
+enabled for consequential decisions.
+
 Ollama uses its native structured-output endpoint:
 
 ```bash
